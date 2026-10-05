@@ -66,6 +66,15 @@ misreporting a fact, whereas a duration is a measurement.
 
 ## Honesty rules
 
+- **Which mechanism supplied the chapters is recorded** (`mechanism: quicktime chapter
+  track` on a real ffmpeg M4B). A harness reporting "6/6 agree" while quietly reading
+  only one of the two chapter mechanisms would claim less coverage than it has, so a
+  regression to `chpl`-only shows up as a change in that field rather than as a silent
+  loss of checking.
+- **The two chapter mechanisms are compared against each other**, not just against
+  ffprobe. A file carrying both a Nero `chpl` box and a QuickTime chapter track can have
+  them disagree, and a plain chapter comparison passes in that case because neither list
+  is wrong on its own.
 - **A field this harness does not compare is reported as *unchecked*, not as a pass.**
   A harness that only ever confirms the code is a test suite; this one is an
   adversary, and silence would be the one outcome that made it useless.
@@ -74,6 +83,9 @@ misreporting a fact, whereas a duration is a measurement.
   none is a disagreement.
 - **It does not skip what it cannot check.** A file whose chapters exist only in a form
   this harness does not yet read is reported as unverified rather than quietly passed.
+
+As of the QuickTime chapter track landing, there are **no unchecked fields**: every
+comparison above is either checked or reported.
 
 ## Requires
 

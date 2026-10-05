@@ -11,9 +11,9 @@ categories = ["development-tools::testing", "multimedia::audio"]
 publish = false
 
 [dependencies]
-audiobook-core = { version = "0.2", path = "../audiobook-core" }
+audiobook-core = { version = "0.3", path = "../audiobook-core" }
 id3-core = { version = "0.1", path = "../id3-core" }
-mp4-core = { version = "0.2", path = "../mp4-core" }
+mp4-core = { version = "0.3", path = "../mp4-core" }
 
 [dev-dependencies]
 # The independent pure-Rust reader. Present so this harness can disagree with the

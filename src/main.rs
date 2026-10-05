@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use audiobook_conformance::{
-    compare_chapters, compare_duration, has_ffmpeg, has_ffprobe, ActualChapter, Corpus, CorpusFile,
-    Error, FileKind, Report, Source,
+    compare_chapters, compare_duration, has_ffmpeg, has_ffprobe, ActualChapter, ChapterFinding,
+    Corpus, CorpusFile, Error, FileKind, Report, Source,
 };
 
 fn main() -> ExitCode {
@@ -60,6 +60,9 @@ fn run(opts: &Options) -> Result<ExitCode, Error> {
         let report = check(file)?;
         if opts.verbose || !report.is_clean() || report.has_unverified() {
             println!("{}", report.summary());
+        }
+        if opts.verbose {
+            println!("         mechanism: {}", report.mechanism);
         }
         reports.push(report);
     }
@@ -118,28 +121,24 @@ fn check(file: &CorpusFile) -> Result<Report, Error> {
         what: "read corpus file",
         source: format!("{}: {e}", file.path.display()),
     })?;
-    let (container, chapters, duration_ms, title, artist) = match &file.kind {
-        FileKind::M4bWithChapters | FileKind::M4aBare | FileKind::M4bTextTrackChapters => {
-            let p = audiobook_core::MediaProbe::probe(&bytes);
-            (
-                "mp4",
-                p.chapters.clone(),
-                p.duration_ms,
-                p.title.clone(),
-                p.artist.clone(),
-            )
-        }
-        FileKind::Mp3CbrTagged | FileKind::Mp3Vbr | FileKind::Mp3Folder => {
-            let p = audiobook_core::MediaProbe::probe(&bytes);
-            (
-                "mp3",
-                p.chapters.clone(),
-                p.duration_ms,
-                p.title.clone(),
-                p.artist.clone(),
-            )
-        }
+    // One probe for every kind. The distinction the harness cares about is the
+    // *reference* it compares against, not which reader ran — `MediaProbe` detects the
+    // container itself, which is itself part of what is being tested.
+    let probe = audiobook_core::MediaProbe::probe(&bytes);
+    let container = match file.kind {
+        FileKind::M4bWithChapters | FileKind::M4aBare | FileKind::M4bTextTrackChapters => "mp4",
+        FileKind::Mp3CbrTagged | FileKind::Mp3Vbr | FileKind::Mp3Folder => "mp3",
     };
+    let chapters = probe.chapters.clone();
+    let duration_ms = probe.duration_ms;
+    let title = probe.title.clone();
+    let artist = probe.artist.clone();
+
+    // A file carrying both chapter mechanisms and disagreeing between them is a finding
+    // in its own right: a library that silently prefers one shows a list the file
+    // contradicts, and neither list is wrong on its own — so a plain chapter
+    // comparison would pass while the file is internally inconsistent.
+    let disagreement = probe.chapter_disagreement.clone();
 
     let actual: Vec<ActualChapter> = chapters
         .iter()
@@ -151,23 +150,31 @@ fn check(file: &CorpusFile) -> Result<Report, Error> {
 
     let mut findings = compare_chapters(&file.reference_chapters, &actual);
 
-    // Record what this harness does not compare, so an incomplete check is visible
-    // rather than indistinguishable from a complete one.
-    if !findings.is_empty() || file.reference_chapters.is_empty() {
-        // Whether the QuickTime chapter *track* agrees with `chpl` is not decided here:
-        // reading it needs mdat sample extraction, which this harness does not do.
-        if matches!(file.kind, FileKind::M4bWithChapters) {
-            findings.push(audiobook_conformance::ChapterFinding::Unverified {
-                field: "chapter track titles",
-                reason: "needs mdat sample extraction, not implemented in this harness",
-            });
-        }
+    // A file carrying both chapter mechanisms and disagreeing between them is a finding
+    // in its own right: a library that silently prefers one shows a list the file
+    // contradicts, so the harness checks that the two agree rather than assuming it.
+    if let Some(split) = &disagreement {
+        findings.push(ChapterFinding::MechanismDisagreement {
+            chpl_len: split.chpl.len(),
+            track_len: split.chapter_track.len(),
+        });
     }
+
+    // Which mechanism supplied the list. `MediaProbe` prefers the QuickTime chapter
+    // track, so an M4B written by ffmpeg is read through the track — not through the
+    // `chpl` box the corpus's chapters were originally written into.
+    let mechanism = match mp4_core::Mp4File::parse(&bytes) {
+        Ok(f) if !f.chapter_track_chapters.chapters.is_empty() => "quicktime chapter track",
+        Ok(f) if !f.chpl_chapters.chapters.is_empty() => "nero chpl",
+        Ok(_) if !chapters.is_empty() => "container tags (CHAP/CTOC)",
+        _ => "none",
+    };
 
     Ok(Report {
         path: file.path.clone(),
         source: Source::Ffprobe,
         container,
+        mechanism,
         chapters: findings,
         duration: compare_duration(file.reference_duration_ms, duration_ms),
         title,

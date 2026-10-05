@@ -136,6 +136,18 @@ pub enum ChapterFinding {
         /// What the reader said.
         actual: ActualChapter,
     },
+    /// A file carries both a Nero `chpl` box and a QuickTime chapter track, and they
+    /// disagree.
+    ///
+    /// Its own finding rather than a chapter mismatch, because a library that silently
+    /// prefers one mechanism shows the user a list the file contradicts — and neither
+    /// list is *wrong* on its own, so a plain chapter comparison would pass.
+    MechanismDisagreement {
+        /// How many chapters the `chpl` box holds.
+        chpl_len: usize,
+        /// How many the chapter track holds.
+        track_len: usize,
+    },
     /// A field this harness does not yet compare, recorded so it is visible rather
     /// than silently absent.
     Unverified {
@@ -163,6 +175,10 @@ impl fmt::Display for ChapterFinding {
                 f,
                 "chapter {index}: reference `{}` @ {} ms, read `{}` @ {} ms",
                 expected.title, expected.start_ms, actual.title, actual.start_ms
+            ),
+            ChapterFinding::MechanismDisagreement { chpl_len, track_len } => write!(
+                f,
+                "the file carries both chapter mechanisms and they disagree:                  chpl has {chpl_len}, the chapter track has {track_len}"
             ),
             ChapterFinding::Unverified { field, reason } => {
                 write!(f, "{field} unchecked: {reason}")
@@ -267,6 +283,13 @@ pub struct Report {
     pub title: Option<String>,
     /// Artist or narrator.
     pub artist: Option<String>,
+    /// Which chapter mechanism supplied the list, so coverage is self-describing.
+    ///
+    /// A harness reporting "6/6 agree" while quietly reading only one of the two
+    /// mechanisms would claim less coverage than it has. Recording which one ran means
+    /// a regression to `chpl`-only — or to the track only — shows up as a change here
+    /// rather than as a silent loss of checking.
+    pub mechanism: &'static str,
 }
 
 impl Report {
@@ -303,6 +326,8 @@ impl Report {
         for c in &self.chapters {
             if is_disagreement(c) {
                 out.push_str(&format!("\n         chapter: {c}"));
+            } else if let ChapterFinding::MechanismDisagreement { .. } = c {
+                out.push_str(&format!("\n         chapters: {c}"));
             } else if let ChapterFinding::Unverified { field, .. } = c {
                 out.push_str(&format!("\n         unchecked: {field}"));
             }
@@ -318,6 +343,7 @@ fn is_disagreement(c: &ChapterFinding) -> bool {
         ChapterFinding::MissingAll { .. }
             | ChapterFinding::UnexpectedAll { .. }
             | ChapterFinding::Mismatch { .. }
+            | ChapterFinding::MechanismDisagreement { .. }
     )
 }
 
@@ -1249,6 +1275,7 @@ mod tests {
             },
             title: None,
             artist: None,
+            mechanism: "none",
         };
         assert!(!r.is_clean());
         assert!(r.summary().contains("DISAGREEMENT"));
@@ -1271,6 +1298,7 @@ mod tests {
             },
             title: None,
             artist: None,
+            mechanism: "none",
         };
         assert!(r.is_clean(), "an unchecked field is not a disagreement");
         assert!(r.has_unverified(), "but it is not a pass either");
