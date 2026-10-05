@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check ffmpeg is present
+        # The corpus is generated with it. Without it the harness would be
+        # verifying the estate crates against themselves, so the job is skipped
+        # rather than passing vacuously.
+        run: |
+          ffmpeg -version
+          ffprobe -version
+
+      - name: fmt
+        run: cargo fmt --check
+
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test
+
+      - name: conformance
+        run: cargo run -- --root /tmp/audiobook-corpus
+
+  standards:
+    uses: WyattAu/engineering-standards/.github/workflows/rust-kit.yml@main
+    with:
+      tier: a
+      all-features: true
