@@ -3,6 +3,41 @@
 All notable changes to this project are documented here. Format: [Keep a
 Changelog](https://keepachangelog.com/) versions follow [semver](https://semver.org/).
 
+### Added
+
+- **Three MP3 chapter fixtures**, the shape this harness covered least. `CHAP` existed in
+  `id3-core` and `audiobook-core` read it, but every MP3 in the corpus was ffmpeg-written,
+  which is a single writer with a single set of habits:
+  - `CHAP` frames with **no** `CTOC`, which the spec permits and ffmpeg cannot produce.
+  - A `CTOC` whose flags are `0x02` \u{2014} top level, not ordered. Every ffmpeg-written
+    TOC sets *both* flag bits (`0x03`), so a reader that transposes them reads every
+    corpus file correctly by accident. This is the byte mutagen writes for
+    `CTOCFlags.TOP_LEVEL`, and it is the fixture that would have caught id3-core's
+    transposed flags.
+  - An **ID3v2.3** tag, which ffmpeg never writes. Its frame header is ten bytes in
+    practice, its sizes are plain rather than synch-safe, and UTF-8 is not a legal text
+    encoding in it at all.
+
+- **`Corpus::generate` now asserts each fixture contains what its recipe promised**
+  (`FileKind::expected_chapters`). A fixture that failed to encode its chapters was the
+  most dangerous failure available here: both sides then found nothing and agreed, so
+  every downstream comparison passed while testing nothing. It is not hypothetical \u{2014} a
+  `CHAP` fixture that lost its sub-frame header reported a clean pass for a whole
+  iteration. `Error::FixtureFailed` stops the run, and a sabotaged fixture was confirmed
+  to exit non-zero.
+
+- **`UNCHECKED_FIELDS`** \u{2014; a printed list of what is *not* compared, so a run cannot
+  imply coverage it lacks: ID3 chapter end times, `CTOC` hierarchy and depth, `CHAP` byte
+  offsets, and the specification-shaped v2.3 header that no available tool reads.
+
+### Fixed
+
+- **The harness's own JSON reader did not unescape strings.** Its doc said "unescaped"
+  while the code returned raw text, so any title containing a quote, a backslash or a
+  newline compared as a disagreement every time. Found the moment a corpus title contained
+  a newline. Full JSON escape support now, including `\uXXXX` and surrogate pairs, and an
+  escape JSON does not define is an error rather than a guess.
+
 ## [0.2.0] - 2026-10-06
 
 The harness stops pointing every tool at files ffmpeg wrote.

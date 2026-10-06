@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "audiobook-conformance"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "audiobook-core",
  "id3-core",
@@ -15,7 +15,7 @@ dependencies = [
 
 [[package]]
 name = "audiobook-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "id3-core",
  "mp4-core",
@@ -41,7 +41,7 @@ checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
 
 [[package]]
 name = "id3-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror",
 ]

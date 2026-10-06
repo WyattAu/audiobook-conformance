@@ -74,6 +74,25 @@ Tolerances are deliberately different for the two, and the reason is worth stati
 a chapter boundary is **exact metadata written by the producer**, so shifting one is
 misreporting a fact, whereas a duration is a measurement.
 
+## A fixture that loses its chapters fails the run
+
+Every corpus file declares how many chapters its recipe is supposed to produce, and
+`Corpus::generate` checks that against what ffprobe actually reports. Without that check
+the most dangerous failure available here is silent: a fixture that failed to encode its
+chapters leaves *both* sides finding nothing, so every comparison passes while comparing
+nothing.
+
+That is not hypothetical. A hand-built `CHAP` frame that lost its sub-frame header
+reported a clean pass for a whole iteration, which is why the expectation is asserted
+where it can still stop the run, as `Error::FixtureFailed`.
+
+## Not checked
+
+`UNCHECKED_FIELDS` is printed on every run. Agreement is only ever agreement on what is
+compared, and these are the things a reader could otherwise assume were verified: ID3
+chapter end times, `CTOC` hierarchy and depth, `CHAP` byte offsets, and the
+specification-shaped v2.3 frame header that no available tool reads.
+
 ## Honesty rules
 
 - **Which mechanism supplied the chapters is recorded** (`mechanism: quicktime chapter

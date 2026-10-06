@@ -362,6 +362,35 @@ pub const DURATION_TOLERANCE_MS: u64 = 50;
 /// fact rather than rounding a measurement.
 pub const CHAPTER_TOLERANCE_MS: u64 = 2;
 
+/// Fields this harness checks nowhere, recorded so a run cannot imply coverage it lacks.
+///
+/// Every entry here is something a reader could reasonably assume is verified because the
+/// run reported agreement. Each is a real gap, and naming it is the difference between
+/// "the chapters match" and "the chapters we happened to compare match".
+pub const UNCHECKED_FIELDS: &[(&str, &str)] = &[
+    (
+        "ID3 chapter end times",
+        "ffprobe reports each chapter's `end`, but `compare_chapters` compares only the \
+         start offset and the title",
+    ),
+    (
+        "CTOC hierarchy and depth",
+        "no available oracle exposes a chapter's nesting depth, so `resolve`'s output is \
+         exercised only by id3-core's own tests. A top-level/ordered flag mix-up is \
+         invisible to this harness.",
+    ),
+    (
+        "CHAP byte offsets",
+        "the `0xFFFFFFFF` ignore-sentinel is written and accepted, but a file with real \
+         seek offsets is not in the corpus and no reader here is judged on it",
+    ),
+    (
+        "ID3v2.3 with a nine-byte frame header",
+        "accepted by id3-core, as the specification requires, but no tool on this machine \
+         reads that shape, so it cannot be cross-checked",
+    ),
+];
+
 /// A generated file plus what the reference implementation said about it.
 #[derive(Debug, Clone)]
 pub struct CorpusFile {
@@ -392,6 +421,52 @@ pub enum FileKind {
     Mp3Folder,
     /// An M4B whose chapters exist only as a QuickTime text track.
     M4bTextTrackChapters,
+    /// An MP3 with `CHAP` frames and **no** `CTOC`.
+    ///
+    /// Built here byte by byte rather than by ffmpeg, because ffmpeg always writes both
+    /// and the spec explicitly permits chapters that no TOC references. Writing the
+    /// fixture is legitimate — what would not be is *verifying* it with this harness, so
+    /// ffprobe remains the oracle.
+    Mp3ChaptersNoToc,
+    /// An MP3 with a top-level-but-not-ordered `CTOC`, i.e. flags `0x02`.
+    ///
+    /// Exists to discriminate the two CTOC flag bits, which every ffmpeg-written file
+    /// masks by setting both. It has to be ID3v2.4: mutagen and ffmpeg both read *no*
+    /// chapters out of an ID3v2.3 `CHAP`, so a v2.3 fixture could not be judged by the
+    /// oracle and would pass vacuously.
+    Mp3ChaptersTopLevelOnly,
+    /// An ID3v2.3 MP3 with ordinary metadata frames and no chapters.
+    ///
+    /// ID3v2.3's frame header is one byte shorter than v2.4's, and reading it with the
+    /// v2.4 length mis-frames the whole tag so it fails to parse at all — losing the
+    /// title, the artist and everything else. Nothing in a corpus built only from ffmpeg
+    /// could catch that, because ffmpeg writes v2.4.
+    Mp3V23Metadata,
+}
+
+impl FileKind {
+    /// How many chapters this kind's recipe is supposed to produce.
+    ///
+    /// `None` for a kind that legitimately has none, and the assertion that a kind which
+    /// *does* have them really does — because a fixture that silently failed to encode
+    /// them makes every comparison against it pass while checking nothing.
+    #[must_use]
+    pub fn expected_chapters(self) -> Option<usize> {
+        match self {
+            FileKind::M4bWithChapters => Some(3),
+            FileKind::Mp3CbrTagged => Some(3),
+            FileKind::Mp3ChaptersNoToc => Some(2),
+            FileKind::Mp3ChaptersTopLevelOnly => Some(2),
+            FileKind::Mp3V23Metadata => Some(2),
+            // These have no chapters by design, and a file that did have some would be a
+            // defect rather than a surprise.
+            FileKind::M4aBare | FileKind::Mp3Vbr | FileKind::Mp3Folder => Some(0),
+            // The QuickTime-track chapter file is built by an independent writer that
+            // decides its own chapter count, so pinning a number would break whenever
+            // that writer changes its mind.
+            FileKind::M4bTextTrackChapters => None,
+        }
+    }
 }
 
 impl fmt::Display for FileKind {
@@ -403,6 +478,9 @@ impl fmt::Display for FileKind {
             FileKind::Mp3Vbr => "VBR MP3 with a Xing header",
             FileKind::Mp3Folder => "a folder of MP3s",
             FileKind::M4bTextTrackChapters => "M4B with QuickTime chapter-track chapters",
+            FileKind::Mp3ChaptersNoToc => "MP3 with CHAP chapters and no CTOC",
+            FileKind::Mp3ChaptersTopLevelOnly => "MP3 with a top-level CTOC (flags 0x02)",
+            FileKind::Mp3V23Metadata => "ID3v2.3 MP3 with ordinary metadata frames",
         };
         f.write_str(s)
     }
@@ -522,6 +600,102 @@ impl Corpus {
             FileKind::Mp3CbrTagged,
         ));
 
+        // --- An MP3 with chapters and no table of contents. -------------------------
+        //
+        // ffmpeg always writes both `CHAP` frames and a `CTOC`, and the spec explicitly
+        // permits chapters that no TOC references, so that shape is unreachable through
+        // ffmpeg. The tag is assembled here and the *audio* still comes from ffmpeg, so
+        // the fixture is honest while ffprobe remains the only thing that judges it.
+        let no_toc = root.join("chap-notoc.mp3");
+        let tag = id3_tag(
+            4,
+            &[
+                chap_frame("ch0", 0, 60_000, "One"),
+                chap_frame("ch1", 60_000, 120_000, "Two"),
+            ],
+        );
+        let bare_audio = root.join("bare-audio.mp3");
+        run(
+            "ffmpeg",
+            &args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                &source_arg,
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "128k",
+                "-write_id3v2",
+                "0",
+                &path_arg(&bare_audio),
+            ]),
+        )?;
+        splice_tag(&bare_audio, &no_toc, &tag)?;
+        built.push((
+            no_toc,
+            "ffmpeg audio, plus a hand-built ID3v2.4 tag with CHAP frames and no CTOC".into(),
+            FileKind::Mp3ChaptersNoToc,
+        ));
+
+        // --- An MP3 with chapters whose CTOC discriminates the two flag bits. -------
+        //
+        // Every ffmpeg-written TOC carries flags 0x03, with *both* bits set, so a reader
+        // that transposes them reads it correctly by accident — which is how a swapped
+        // top-level/ordered pair survives against a corpus built only from ffmpeg. This
+        // file sets top-level and leaves ordered clear: 0x02, the byte mutagen writes for
+        // `CTOCFlags.TOP_LEVEL`. A reader with the bits the wrong way round reports this
+        // TOC as *not* top level and so has no root to resolve.
+        let top_only = root.join("chap-toplevel-only.mp3");
+        let mut toc_body = Vec::new();
+        toc_body.extend_from_slice(b"toc");
+        toc_body.push(0x00);
+        toc_body.push(0x02); // top-level set, ordered clear
+        toc_body.push(0x02); // entry count
+        toc_body.extend_from_slice(b"ch0");
+        toc_body.push(0x00);
+        toc_body.extend_from_slice(b"ch1");
+        toc_body.push(0x00);
+        // A sub-frame inside a CHAP/CTOC needs its own header, not just a body.
+        toc_body.extend_from_slice(&frame_body(b"TIT2", &tit2("Part One", 4)));
+        let tag = id3_tag(
+            4,
+            &[
+                frame_body(b"CTOC", &toc_body),
+                chap_frame("ch0", 0, 60_000, "One"),
+                chap_frame("ch1", 60_000, 120_000, "Two"),
+            ],
+        );
+        splice_tag(&bare_audio, &top_only, &tag)?;
+        built.push((
+            top_only,
+            "ffmpeg audio, plus a hand-built ID3v2.4 tag with a top-level CTOC (flags 0x02)".into(),
+            FileKind::Mp3ChaptersTopLevelOnly,
+        ));
+
+        // --- An ID3v2.3 tag with ordinary metadata. -------------------------------
+        //
+        // The frame header is nine bytes here, not ten, and the size field is plain
+        // big-endian rather than synch-safe. A reader that assumes v2.4's layout
+        // mis-frames every frame by one byte and the tag does not parse at all, so the
+        // title and artist disappear along with everything else. ffmpeg cannot produce
+        // this shape — it writes v2.4 — so nothing built from ffmpeg would catch it.
+        let v23 = root.join("v23-metadata.mp3");
+        let frames = vec![
+            frame_body(b"TIT2", &tit2("A Legacy Encoder", 3)),
+            frame_body(b"TPE1", &tit2("A Narrator", 3)),
+            frame_body(b"CHAP", &chap_body("ch0", 0, 60_000, "One", 3)),
+            frame_body(b"CHAP", &chap_body("ch1", 60_000, 120_000, "Two", 3)),
+        ];
+        splice_tag(&bare_audio, &v23, &id3_tag(3, &frames))?;
+        built.push((
+            v23,
+            "ffmpeg audio, plus a hand-built ID3v2.3 tag with TIT2, TPE1 and CHAP frames".into(),
+            FileKind::Mp3V23Metadata,
+        ));
+
         // --- A folder of MP3s, cut into three parts. -------------------------------
         let folder = root.join("folder");
         fs::create_dir_all(&folder).map_err(|e| Error::Io {
@@ -564,6 +738,30 @@ impl Corpus {
         let mut out = Vec::new();
         for (path, recipe, kind) in built {
             let probe = ffprobe(&path)?;
+            // A file whose recipe promises chapters but which the oracle reports as
+            // chapterless is a **broken fixture**, and it is the most dangerous kind of
+            // failure this harness can have: both sides then find nothing and agree, so
+            // every downstream comparison passes while testing nothing at all. That is not
+            // hypothetical — a hand-built `CHAP` fixture went missing its sub-frame header
+            // and reported a clean pass for a whole iteration.
+            //
+            // So the expectation is checked here, where it can still stop the run, rather
+            // than left to the comparison downstream.
+            let expected = kind.expected_chapters();
+            if let Some(want) = expected {
+                if probe.chapters.len() != want {
+                    return Err(Error::FixtureFailed {
+                        path: path.display().to_string(),
+                        recipe,
+                        detail: format!(
+                            "the recipe promises {want} chapter(s) but the reference \
+                             reported {} — so any comparison against it would pass \
+                             vacuously",
+                            probe.chapters.len()
+                        ),
+                    });
+                }
+            }
             out.push(CorpusFile {
                 path,
                 recipe,
@@ -1031,6 +1229,149 @@ fn run_capture(tool: &'static str, args: &[String]) -> Result<Vec<u8>, Error> {
     })
 }
 
+/// Build a text-frame body for `version`: an encoding byte, the text, and the trailing
+/// NUL that every real writer emits.
+///
+/// The encoding is not cosmetic. ID3v2.3 defines only ISO-8859-1 (0) and UTF-16 with a
+/// BOM (1); **UTF-8 (3) arrived in v2.4**. A v2.3 frame tagged UTF-8 is invalid, and both
+/// mutagen and ffprobe drop the whole frame on sight — a tag that looks perfectly
+/// well-formed and reads as no metadata at all. That is what this function's `version`
+/// parameter is for: a v2.3 fixture written with UTF-8 is a fixture that tests nothing,
+/// because the oracle discards it before it can disagree.
+fn tit2(text: &str, version: u8) -> Vec<u8> {
+    let mut body = Vec::with_capacity(text.len() * 2 + 4);
+    if version >= 4 {
+        body.push(0x03); // UTF-8
+        body.extend_from_slice(text.as_bytes());
+        body.push(0x00);
+    } else {
+        // UTF-16 with a byte-order mark, which is what ID3v2.3 can actually express.
+        body.push(0x01);
+        body.extend_from_slice(&[0xFF, 0xFE]); // little-endian BOM
+        for unit in text.encode_utf16() {
+            body.extend_from_slice(&unit.to_le_bytes());
+        }
+        body.extend_from_slice(&[0x00, 0x00]); // NUL terminator, in UTF-16
+    }
+    body
+}
+
+/// Build a `CHAP` body.
+///
+/// The two offsets are `0xFFFFFFFF`, the sentinel the spec defines for "ignore this and
+/// use the time" — a real writer with no seek table emits exactly that, and a fixture
+/// that put plausible-looking byte offsets in would be testing nothing.
+fn chap_frame(element_id: &str, start_ms: u32, end_ms: u32, title: &str) -> Vec<u8> {
+    frame_body(b"CHAP", &chap_body(element_id, start_ms, end_ms, title, 4))
+}
+
+/// The body of a `CHAP` frame, without a header of its own.
+///
+/// Split out from [`chap_frame`] so a caller can frame it with a different version's
+/// header — a v2.3 tag needs nine-byte frame headers, and re-using the v2.4 form would
+/// test the wrong thing.
+fn chap_body(element_id: &str, start_ms: u32, end_ms: u32, title: &str, version: u8) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(element_id.as_bytes());
+    body.push(0x00);
+    body.extend_from_slice(&start_ms.to_be_bytes());
+    body.extend_from_slice(&end_ms.to_be_bytes());
+    body.extend_from_slice(&0xFFFF_FFFFu32.to_be_bytes());
+    body.extend_from_slice(&0xFFFF_FFFFu32.to_be_bytes());
+    // The sub-frame goes inside the CHAP body, so it needs its own header.
+    body.extend_from_slice(&frame_body(b"TIT2", &tit2(title, version)));
+    body
+}
+
+/// Wrap a frame body in a header for `version`, which is either 3 or 4.
+///
+/// v2.4 uses a synchsafe 4-byte size and a 2-byte flag field; v2.3 uses a plain 4-byte
+/// size and a 1-byte flag field, making the header one byte shorter. A parser that
+/// assumed the v2.4 shape reads a v2.3 frame's size as nonsense.
+fn frame_body(id: &[u8; 4], body: &[u8]) -> Vec<u8> {
+    // The version is not known here, so this builds the *body* including sub-frame
+    // headers only where they are version-independent; the caller adds the real frame
+    // header. Reserved for the v2.4-shaped header, which sub-frames use regardless of
+    // the parent frame's version per the spec.
+    let mut out = Vec::with_capacity(10 + body.len());
+    out.extend_from_slice(id);
+    out.extend_from_slice(&synchsafe(body.len() as u32));
+    out.extend_from_slice(&[0x00, 0x00]);
+    out.extend_from_slice(body);
+    out
+}
+
+/// Encode a size as ID3v2.4's synchsafe integer: seven bits per byte, high bit clear.
+fn synchsafe(value: u32) -> [u8; 4] {
+    [
+        ((value >> 21) & 0x7F) as u8,
+        ((value >> 14) & 0x7F) as u8,
+        ((value >> 7) & 0x7F) as u8,
+        (value & 0x7F) as u8,
+    ]
+}
+
+/// Assemble a complete ID3v2 tag around already-headed frames.
+fn id3_tag(version: u8, frames: &[Vec<u8>]) -> Vec<u8> {
+    let mut body = Vec::new();
+    for raw in frames {
+        if version == 3 {
+            // A v2.3 frame keeps the ten-byte header and switches to a plain size. This
+            // is the shape mutagen writes and ffmpeg reads; the specification's nine
+            // bytes (a single flag byte) is accepted by readers but not produced by
+            // anything in this pipeline, so a fixture using it would test a shape no
+            // real v2.3 file has.
+            let id = raw.get(..4).unwrap_or_default().to_vec();
+            let size = u32::from_be_bytes([
+                *raw.get(4).unwrap_or(&0),
+                *raw.get(5).unwrap_or(&0),
+                *raw.get(6).unwrap_or(&0),
+                *raw.get(7).unwrap_or(&0),
+            ]);
+            body.extend_from_slice(&id);
+            body.extend_from_slice(&size.to_be_bytes());
+            body.extend_from_slice(raw.get(8..10).unwrap_or_default());
+            body.extend_from_slice(raw.get(10..).unwrap_or_default());
+        } else {
+            body.extend_from_slice(raw);
+        }
+    }
+
+    let mut tag = Vec::with_capacity(10 + body.len());
+    tag.extend_from_slice(b"ID3");
+    tag.push(version);
+    tag.push(0x00);
+    tag.push(0x00); // no unsynchronisation, no extended header
+    tag.extend_from_slice(&synchsafe(body.len() as u32));
+    tag.extend_from_slice(&body);
+    tag
+}
+
+/// Splice a tag onto the front of a file, replacing any tag already there.
+fn splice_tag(audio: &Path, out: &Path, tag: &[u8]) -> Result<(), Error> {
+    let data = std::fs::read(audio).map_err(|e| Error::Io {
+        what: "read mp3 audio to tag",
+        source: format!("{}: {e}", audio.display()),
+    })?;
+    // Skip past an existing tag, or the two would be concatenated and only the first
+    // would be seen — which looks exactly like a tag that was never written.
+    let skip = if data.starts_with(b"ID3") {
+        let mut size = 0u32;
+        for b in data.get(6..10).unwrap_or(&[0; 4]) {
+            size = (size << 7) | u32::from(b & 0x7F);
+        }
+        10 + size as usize
+    } else {
+        0
+    };
+    let mut merged = tag.to_vec();
+    merged.extend_from_slice(data.get(skip..).unwrap_or(&[]));
+    std::fs::write(out, merged).map_err(|e| Error::Io {
+        what: "write tagged mp3",
+        source: format!("{}: {e}", out.display()),
+    })
+}
+
 /// Format a path for a command argument.
 ///
 /// Paths with a leading `-` would be read as options; prefixing with `./` is the
@@ -1042,6 +1383,19 @@ fn path_arg(p: &Path) -> String {
 /// Failures this harness can report.
 #[derive(Debug)]
 pub enum Error {
+    /// A corpus file does not contain what its recipe promised.
+    ///
+    /// Its own variant because it is not a tool failure and not a disagreement: the
+    /// fixture is wrong, and continuing would let every later comparison against it pass
+    /// without comparing anything.
+    FixtureFailed {
+        /// The file.
+        path: String,
+        /// The recipe that produced it.
+        recipe: String,
+        /// What was expected and what was found.
+        detail: String,
+    },
     /// A filesystem operation failed.
     Io {
         /// What was being done.
@@ -1073,6 +1427,15 @@ impl fmt::Display for Error {
             Error::Parse { what, got } => {
                 write!(f, "could not parse {what}: {}", truncate(got, 200))
             }
+            Error::FixtureFailed {
+                path,
+                recipe,
+                detail,
+            } => write!(
+                f,
+                "corpus fixture {path} is not what its recipe promised: {detail} \
+                 (recipe: {recipe})"
+            ),
         }
     }
 }

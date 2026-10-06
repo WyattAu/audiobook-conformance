@@ -92,6 +92,12 @@ fn run(opts: &Options) -> Result<ExitCode, Error> {
     }
     println!("\n{clean} agree, {broken} disagree, {unverified} carry an unchecked field");
 
+    println!("\n── not checked ──────────────────────────────────────────────────");
+    println!("Agreement is only ever agreement on what is compared. These are not:");
+    for (field, why) in audiobook_conformance::UNCHECKED_FIELDS {
+        println!("  · {field}: {why}");
+    }
+
     // --- The sidecar round trip, with the roles reversed. ---------------------------
     //
     // Everything above tests the estate as a *reader* of files ffmpeg wrote. This tests
@@ -149,12 +155,15 @@ fn run(opts: &Options) -> Result<ExitCode, Error> {
     Ok(ExitCode::SUCCESS)
 }
 
-const ALL_KINDS: [FileKind; 5] = [
+const ALL_KINDS: [FileKind; 8] = [
     FileKind::M4bWithChapters,
     FileKind::M4aBare,
     FileKind::Mp3CbrTagged,
     FileKind::Mp3Vbr,
     FileKind::Mp3Folder,
+    FileKind::Mp3ChaptersNoToc,
+    FileKind::Mp3ChaptersTopLevelOnly,
+    FileKind::Mp3V23Metadata,
 ];
 
 /// Read one file with the estate crates and compare against ffprobe's report.
@@ -169,7 +178,12 @@ fn check(file: &CorpusFile) -> Result<Report, Error> {
     let probe = audiobook_core::MediaProbe::probe(&bytes);
     let container = match file.kind {
         FileKind::M4bWithChapters | FileKind::M4aBare | FileKind::M4bTextTrackChapters => "mp4",
-        FileKind::Mp3CbrTagged | FileKind::Mp3Vbr | FileKind::Mp3Folder => "mp3",
+        FileKind::Mp3CbrTagged
+        | FileKind::Mp3Vbr
+        | FileKind::Mp3Folder
+        | FileKind::Mp3ChaptersNoToc
+        | FileKind::Mp3ChaptersTopLevelOnly
+        | FileKind::Mp3V23Metadata => "mp3",
     };
     let chapters = probe.chapters.clone();
     let duration_ms = probe.duration_ms;

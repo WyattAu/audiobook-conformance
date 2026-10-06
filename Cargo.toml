@@ -1,6 +1,6 @@
 [package]
 name = "audiobook-conformance"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Conformance harness for the WyattAu audiobook stack — generates a corpus with ffmpeg and cross-checks mp4-core, id3-core and audiobook-core against ffprobe and Symphonia"
@@ -11,8 +11,8 @@ categories = ["development-tools::testing", "multimedia::audio"]
 publish = false
 
 [dependencies]
-audiobook-core = { version = "0.4", path = "../audiobook-core" }
-id3-core = { version = "0.1", path = "../id3-core" }
+audiobook-core = { version = "0.5", path = "../audiobook-core" }
+id3-core = { version = "0.2", path = "../id3-core" }
 mp4-core = { version = "0.3", path = "../mp4-core" }
 
 [dev-dependencies]
