@@ -59,6 +59,16 @@ the corpus is reproducible from source and the repository stays small.
 - **Chapters** — count, start offset (2 ms tolerance) and title, against ffprobe.
 - **Duration** — 50 ms tolerance, about one AAC frame. Tighter than nothing because
   encoders pad frames, looser than nothing because rounding is real.
+- **Chapter sidecars, in both directions.** The checks above all read files *ffmpeg*
+  wrote, which can only catch a reader defect — no byte this estate writes had ever been
+  seen by an implementation that did not write it. That is the same blind spot that hid
+  `mp4-core`'s `chpl` layout defect for several releases, when every `chpl` test had run
+  against a box the crate wrote itself. So the sidecar round trip reverses the roles:
+  the estate renders a `;FFMETADATA1` file and ffmpeg muxes it, and separately ffmpeg
+  dumps a real corpus file with `-f ffmetadata` for the estate to read. Ten awkward
+  titles go through it: `=`, `;`, `#`, a mid-title backslash, a newline, surrounding
+  whitespace, one that looks like a section header, multi-byte UTF-8, quotes and percent
+  signs, and an empty title.
 
 Tolerances are deliberately different for the two, and the reason is worth stating:
 a chapter boundary is **exact metadata written by the producer**, so shifting one is

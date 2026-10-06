@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use audiobook_conformance::sidecar::{self, SidecarFinding};
 use audiobook_conformance::{
     compare_chapters, compare_duration, has_ffmpeg, has_ffprobe, ActualChapter, ChapterFinding,
     Corpus, CorpusFile, Error, FileKind, Report, Source,
@@ -90,6 +91,47 @@ fn run(opts: &Options) -> Result<ExitCode, Error> {
         );
     }
     println!("\n{clean} agree, {broken} disagree, {unverified} carry an unchecked field");
+
+    // --- The sidecar round trip, with the roles reversed. ---------------------------
+    //
+    // Everything above tests the estate as a *reader* of files ffmpeg wrote. This tests
+    // it as a *writer*: the estate emits a chapter sidecar, ffmpeg muxes it, and ffprobe
+    // reports what survived. Without it, no byte this estate produces has ever been seen
+    // by an implementation that did not write it — the same blind spot that hid the
+    // `chpl` layout defect for several releases.
+    let sidecar_report = sidecar::check(&opts.root)?;
+    println!("\n── sidecar ─────────────────────────────────────────────────────");
+    print!("{}", sidecar_report.summary());
+    for finding in &sidecar_report.findings {
+        println!("  · {}", describe(finding));
+    }
+
+    if sidecar_report.has_self_defect() {
+        println!(
+            "\nA sidecar case did not survive the estate's own writer and reader. That has \
+             no external explanation: the crate lost a chapter of its own making."
+        );
+        return Ok(ExitCode::from(1));
+    }
+    let unexplained = sidecar_report
+        .findings
+        .iter()
+        .filter(|f| {
+            matches!(
+                f,
+                SidecarFinding::Disagreement { .. }
+                    | SidecarFinding::MuxFailed { .. }
+                    | SidecarFinding::SelfRoundTrip { .. }
+            )
+        })
+        .count();
+    if unexplained > 0 {
+        println!(
+            "\n{unexplained} sidecar finding(s) are not explained by a known ffmpeg \
+             limitation. Each one is a real disagreement between two implementations."
+        );
+        return Ok(ExitCode::from(1));
+    }
 
     if broken > 0 {
         println!(
@@ -180,6 +222,41 @@ fn check(file: &CorpusFile) -> Result<Report, Error> {
         title,
         artist,
     })
+}
+
+/// One finding, as a sentence.
+fn describe(f: &SidecarFinding) -> String {
+    match f {
+        SidecarFinding::SelfRoundTrip { case, detail } => {
+            format!("DEFECT `{case}`: the estate's own round trip lost something — {detail}")
+        }
+        SidecarFinding::Disagreement {
+            case,
+            index,
+            ours,
+            theirs,
+        } => {
+            let where_ = if *index == usize::MAX {
+                format!("`{case}`")
+            } else {
+                format!("`{case}` chapter {index}")
+            };
+            format!("DISAGREE {where_}: estate says {ours}, ffmpeg says {theirs}")
+        }
+        SidecarFinding::DocumentedFfmpegLimit { case, detail } => {
+            format!("KNOWN ffmpeg limitation `{case}`: {detail}")
+        }
+        SidecarFinding::MuxFailed { case, detail } => {
+            format!("MUX FAILED `{case}`: {detail}")
+        }
+        SidecarFinding::Unchecked { field, why } => {
+            format!("UNCHECKED {field}: {why}")
+        }
+        // `SidecarFinding` is `#[non_exhaustive]`, so a new variant is possible. It must
+        // not fall through as silence: an unrecognised finding is printed as unknown
+        // rather than dropped, so adding one can never quietly shrink the report.
+        other => format!("UNRECOGNISED finding, not classified: {other:?}"),
+    }
 }
 
 struct Options {

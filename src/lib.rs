@@ -783,10 +783,74 @@ fn json_number(json: &str, key: &str) -> Option<f64> {
     raw.trim().parse::<f64>().ok()
 }
 
-/// The string value of `"key": "value"` within `json`, unescaped.
+/// The string value of `"key": "value"` within `json`, with JSON escapes resolved.
+///
+/// Returns `None` when the value is not a string or contains an escape JSON does not
+/// define. Resolving the escapes is not optional: ffprobe writes a title containing a
+/// quote, a backslash or a newline as `\"`, `\\` and `\n`, and comparing the raw text
+/// would report a perfectly good chapter as a disagreement on every title containing any
+/// of those. That is not hypothetical \u{2014} it is exactly what the sidecar round trip
+/// found the first time a corpus title had a newline in it.
 fn json_string(json: &str, key: &str) -> Option<String> {
-    let raw = json_field(json, key)?;
-    Some(raw.to_string())
+    json_unescape(json_field(json, key)?)
+}
+
+/// Resolve JSON string escapes.
+///
+/// The full set JSON defines, including `\uXXXX` and surrogate pairs \u{2014} ffprobe emits
+/// `\u00e9`-style escapes for some characters and raw UTF-8 for others depending on the
+/// build, so both forms have to work. Returns `None` for an escape JSON does not define or
+/// a lone surrogate, rather than guessing: a harness that quietly turns a broken escape
+/// into a plausible string will report a disagreement that is not there, or hide one that
+/// is.
+fn json_unescape(raw: &str) -> Option<String> {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    // `chars.clone()` is passed to `hex4` so it can look ahead without consuming.
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next()? {
+            '"' => out.push('"'),
+            '\\' => out.push('\\'),
+            '/' => out.push('/'),
+            'b' => out.push('\u{8}'),
+            'f' => out.push('\u{c}'),
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            'u' => {
+                let high = hex4(&mut chars)?;
+                let code = if (0xD800..0xDC00).contains(&high) {
+                    // A high surrogate must be followed by `\uDC00`-`\uDFFF`.
+                    if chars.next()? != '\\' || chars.next()? != 'u' {
+                        return None;
+                    }
+                    let low = hex4(&mut chars)?;
+                    if !(0xDC00..0xE000).contains(&low) {
+                        return None;
+                    }
+                    0x1_0000 + ((high - 0xD800) << 10) + (low - 0xDC00)
+                } else {
+                    high
+                };
+                out.push(char::from_u32(code)?);
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
+/// Four hex digits off the front of an iterator, as a `u32`.
+fn hex4(chars: &mut impl Iterator<Item = char>) -> Option<u32> {
+    let mut value: u32 = 0;
+    for _ in 0..4 {
+        value = value * 16 + chars.next()?.to_digit(16)?;
+    }
+    Some(value)
 }
 
 /// Pull the raw text of `"key": "value"` or `"key": 123` out of a JSON fragment.
@@ -930,6 +994,32 @@ fn run(tool: &'static str, args: &[String]) -> Result<(), Error> {
         })?;
     if out.status.success() {
         return Ok(());
+    }
+    Err(Error::Tool {
+        tool,
+        reason: format!(
+            "{tool} {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ),
+    })
+}
+
+/// Run a tool and return its stdout, turning a non-zero exit into an error carrying its
+/// stderr.
+///
+/// Needed wherever the tool's *output* is the thing under test \u{2014} dumping chapters
+/// as ffmetadata, for instance \u{2014} where [`run`] throws the bytes away.
+fn run_capture(tool: &'static str, args: &[String]) -> Result<Vec<u8>, Error> {
+    let out = Command::new(tool)
+        .args(args)
+        .output()
+        .map_err(|e| Error::Tool {
+            tool,
+            reason: e.to_string(),
+        })?;
+    if out.status.success() {
+        return Ok(out.stdout);
     }
     Err(Error::Tool {
         tool,
@@ -1089,11 +1179,81 @@ pub fn compare_chapters(
 /// A grouping of findings by outcome, for a summary line.
 pub type Tally = BTreeMap<&'static str, usize>;
 
+/// Cross-checking the estate's chapter sidecar writer and reader against ffmpeg.
+pub mod sidecar;
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
+
+    #[test]
+    fn json_string_escapes_are_resolved_rather_than_compared_raw() {
+        // ffprobe writes these escapes for a title that contains them, verbatim. This is
+        // the actual output captured from `ffprobe -show_chapters -print_format json`.
+        let json =
+            r#"{"chapters":[{"id":0,"start_time":0.0,"tags":{"title":"Line one\nLine two"}}]}"#;
+        let probe = parse_ffprobe_json(json).expect("parses");
+        assert_eq!(probe.chapters.len(), 1);
+        assert_eq!(
+            probe.chapters[0].title, "Line one\nLine two",
+            "the JSON escape must become a real newline, not two characters"
+        );
+
+        // A quote and a backslash, which is the other pair a real title contains.
+        let json = r#"{"chapters":[{"id":0,"tags":{"title":"He said \"hi\" 100% \\ sure"}}]}"#;
+        let probe = parse_ffprobe_json(json).expect("parses");
+        assert_eq!(probe.chapters[0].title, "He said \"hi\" 100% \\ sure");
+    }
+
+    #[test]
+    fn every_json_escape_the_spec_defines_is_handled() {
+        for (raw, want) in [
+            (r#"\""#, "\""),
+            (r#"\\"#, "\\"),
+            (r#"\/"#, "/"),
+            (r#"\b"#, "\u{8}"),
+            (r#"\f"#, "\u{c}"),
+            (r#"\n"#, "\n"),
+            (r#"\r"#, "\r"),
+            (r#"\t"#, "\t"),
+            (r#"\u0041"#, "A"),
+            (r#"\u00e9"#, "\u{e9}"),
+            (r#"\u4e2d"#, "\u{4e2d}"),
+            // A surrogate pair for an astral code point: the book emoji.
+            (r#"\ud83d\udcda"#, "\u{1f4da}"),
+            // And a raw multi-byte character, which is what ffprobe usually emits.
+            ("\u{4e2d}\u{6587}", "\u{4e2d}\u{6587}"),
+        ] {
+            assert_eq!(json_unescape(raw).as_deref(), Some(want), "for {raw}");
+        }
+    }
+
+    #[test]
+    fn an_escape_json_does_not_define_is_an_error_not_a_guess() {
+        // Guessing here would fabricate or hide a disagreement, which is the one thing a
+        // conformance harness must not do.
+        for bad in [
+            r#"\x"#,
+            r#"\u00"#,
+            r#"\u00ZZ"#,
+            r#"\uD83D"#,
+            r#"\uD83Dx"#,
+            r#"\"#,
+        ] {
+            assert_eq!(json_unescape(bad), None, "for {bad}");
+        }
+    }
+
+    #[test]
+    fn an_escaped_quote_does_not_end_the_string() {
+        // The scan for the closing quote has to respect escapes, or this title is read as
+        // `He said \"hi` and the rest of the JSON is mangled.
+        let json = r#"{"chapters":[{"id":0,"tags":{"title":"a \" b \" c"}}]}"#;
+        let probe = parse_ffprobe_json(json).expect("parses");
+        assert_eq!(probe.chapters[0].title, "a \" b \" c");
+    }
 
     #[test]
     fn parses_a_duration_from_ffprobe_json() {
