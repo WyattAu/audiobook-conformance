@@ -14,12 +14,14 @@ publish = false
 audiobook-core = { version = "0.5", path = "../audiobook-core" }
 id3-core = { version = "0.2", path = "../id3-core" }
 mp4-core = { version = "0.3", path = "../mp4-core" }
-
-[dev-dependencies]
-# The independent pure-Rust reader. Present so this harness can disagree with the
-# estate crates, which is the entire point of it.
+# The independent pure-Rust reader, as a real dependency rather than a dev one: it is
+# a third oracle this harness compares against, not a test convenience. Being pure Rust
+# it also works where ffmpeg is not installed, which is the difference between a harness
+# that runs anywhere and one that runs on a machine someone happened to set up.
 symphonia = { version = "0.6", default-features = false, features = ["isomp4", "mp3"] }
 symphonia-metadata = "0.6"
+
+[dev-dependencies]
 
 [lints.rust]
 unsafe_code = "forbid"

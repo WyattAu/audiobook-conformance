@@ -1544,6 +1544,7 @@ pub type Tally = BTreeMap<&'static str, usize>;
 
 /// Cross-checking the estate's chapter sidecar writer and reader against ffmpeg.
 pub mod sidecar;
+pub mod symphonia;
 
 #[cfg(test)]
 mod tests {

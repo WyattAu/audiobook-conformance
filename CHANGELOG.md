@@ -72,6 +72,29 @@ The harness stops pointing every tool at files ffmpeg wrote.
   support now, including `\uXXXX` and surrogate pairs, and an escape JSON does not define
   is an error rather than a guess.
 
+### Added
+
+- **Symphonia is wired in as a third oracle.** It was declared and named in `Source` but
+  never called, which is worse than absent: a capability a harness lists is a capability a
+  reader assumes it has. With only ffprobe, every finding is "the estate disagrees with
+  ffmpeg", and agreement has a blind spot — there is no way to tell agreement from a shared
+  misreading. Symphonia is pure Rust with no shared code or history with either, so it
+  breaks ties. It also runs where ffmpeg is not installed.
+
+  Scope, stated plainly: Symphonia provides **container identification**, comparing
+  `audiobook-core::container::detect` against a probe that shares nothing with it. It does
+  *not* provide duration, despite this module being written for that first. Symphonia 0.6
+  exposes no duration without decoding — `Track`'s codec parameters carry a sample rate and
+  a codec id but no frame count, and neither the MP3 nor the ISOMP4 reader populates one —
+  so the first version returned `None` for every file, which would have made a duration
+  comparison pass vacuously with both sides reporting nothing. Duration remains ffprobe's,
+  and the reason is written in the module so nobody re-derives it.
+
+  Three Symphonia API facts cost real time and are recorded where the next person will
+  look: the probe lives at `symphonia::core::formats::probe`, not `core::probe`; a bare
+  `Probe` knows no formats, so `symphonia::default::register_enabled_formats` must be
+  called; and the method is `probe`, not `format`, taking its options by value.
+
 ### Reported, not fixed here
 
 - **ffmpeg cannot read a chapter title ending in a backslash.** Escaped correctly, its
