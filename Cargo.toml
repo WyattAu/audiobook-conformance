@@ -12,7 +12,7 @@ publish = false
 
 [dependencies]
 audiobook-core = { version = "0.5", path = "../audiobook-core" }
-id3-core = { version = "0.2", path = "../id3-core" }
+id3-core = { version = "0.3", path = "../id3-core" }
 mp4-core = { version = "0.3", path = "../mp4-core" }
 # The independent pure-Rust reader, as a real dependency rather than a dev one: it is
 # a third oracle this harness compares against, not a test convenience. Being pure Rust
