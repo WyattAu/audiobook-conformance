@@ -374,10 +374,13 @@ pub const UNCHECKED_FIELDS: &[(&str, &str)] = &[
          start offset and the title",
     ),
     (
-        "CTOC hierarchy and depth",
-        "no available oracle exposes a chapter's nesting depth, so `resolve`'s output is \
-         exercised only by id3-core's own tests. A top-level/ordered flag mix-up is \
-         invisible to this harness.",
+        "CTOC nesting depth beyond one level",
+        "mutagen exposes a TOC's child list, flags and membership, and those are now \
+         verified against it \u{2014} which is how id3-core 0.2.0's transposed \
+         top-level/ordered flags would have been caught from the corpus rather than from a \
+         hand-written fixture. What no available oracle computes is the resolved *depth* of \
+         a chapter in a multi-level TOC tree, so `resolve`'s depth assignment is still only \
+         exercised by id3-core's own tests",
     ),
     (
         "CHAP byte offsets",
