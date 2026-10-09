@@ -8,8 +8,9 @@ use std::process::ExitCode;
 
 use audiobook_conformance::sidecar::{self, SidecarFinding};
 use audiobook_conformance::{
-    compare_chapters, compare_duration, has_ffmpeg, has_ffprobe, ActualChapter, ChapterFinding,
-    Corpus, CorpusFile, Error, FileKind, Report, Source,
+    compare_chapters, compare_duration_within, has_ffmpeg, has_ffprobe, ActualChapter,
+    ChapterFinding, Corpus, CorpusFile, Error, FileKind, Report, Source,
+    DECLARED_DURATION_TOLERANCE_MS, DURATION_TOLERANCE_MS,
 };
 
 fn main() -> ExitCode {
@@ -73,7 +74,7 @@ fn run(opts: &Options) -> Result<ExitCode, Error> {
     let broken = reports.len() - clean;
 
     println!("\n── summary ────────────────────────────────────────────────────");
-    for kind in ALL_KINDS {
+    for kind in FileKind::ALL {
         let of_kind: Vec<_> = reports
             .iter()
             .zip(corpus.files.iter())
@@ -155,17 +156,6 @@ fn run(opts: &Options) -> Result<ExitCode, Error> {
     Ok(ExitCode::SUCCESS)
 }
 
-const ALL_KINDS: [FileKind; 8] = [
-    FileKind::M4bWithChapters,
-    FileKind::M4aBare,
-    FileKind::Mp3CbrTagged,
-    FileKind::Mp3Vbr,
-    FileKind::Mp3Folder,
-    FileKind::Mp3ChaptersNoToc,
-    FileKind::Mp3ChaptersTopLevelOnly,
-    FileKind::Mp3V23Metadata,
-];
-
 /// Read one file with the estate crates and compare against ffprobe's report.
 fn check(file: &CorpusFile) -> Result<Report, Error> {
     let bytes = std::fs::read(&file.path).map_err(|e| Error::Io {
@@ -183,7 +173,13 @@ fn check(file: &CorpusFile) -> Result<Report, Error> {
         | FileKind::Mp3Folder
         | FileKind::Mp3ChaptersNoToc
         | FileKind::Mp3ChaptersTopLevelOnly
-        | FileKind::Mp3V23Metadata => "mp3",
+        | FileKind::Mp3V23Metadata
+        | FileKind::Mp3SpokenWord => "mp3",
+        // `FileKind` is `#[non_exhaustive]`, and a kind this binary has not been taught
+        // about is reported rather than guessed at: labelling an unknown container `mp3`
+        // on the strength of its extension would make the container column a claim
+        // nothing checked.
+        _ => "unknown",
     };
     let chapters = probe.chapters.clone();
     let duration_ms = probe.duration_ms;
@@ -232,7 +228,19 @@ fn check(file: &CorpusFile) -> Result<Report, Error> {
         container,
         mechanism,
         chapters: findings,
-        duration: compare_duration(file.reference_duration_ms, duration_ms),
+        // A declared duration is held to a far tighter budget than a derived one,
+        // because a reader that found the encoder's own frame count should land on
+        // ffprobe's millisecond. The looser default would have called a 31 ms
+        // disagreement agreement, which is a defect reporting itself as a pass.
+        duration: compare_duration_within(
+            file.reference_duration_ms,
+            duration_ms,
+            if probe.confidence == audiobook_core::Confidence::Declared {
+                DECLARED_DURATION_TOLERANCE_MS
+            } else {
+                DURATION_TOLERANCE_MS
+            },
+        ),
         title,
         artist,
     })

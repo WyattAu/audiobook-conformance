@@ -38,6 +38,41 @@ Changelog](https://keepachangelog.com/) versions follow [semver](https://semver.
   a newline. Full JSON escape support now, including `\uXXXX` and surrogate pairs, and an
   escape JSON does not define is an error rather than a guess.
 
+### Added
+
+- **A 22.05 kHz mono MP3 fixture — the encoding a spoken-word book actually ships in.**
+  Every MP3 in the corpus was 44.1 kHz, i.e. MPEG-1, so nothing in it could see a mistake
+  in the MPEG-2 side-information widths. The reader's Xing/Info offset was one byte short
+  for MPEG-2, which does not fail loudly — the tag reads as *absent* and the duration is
+  then estimated from a placeholder bitrate — so a 12-second audiobook was reported as 6.9
+  seconds and the run was green.
+
+  Confirmed by reintroducing the bug: with the wrong widths, this fixture and only this
+  fixture reports `0/1 agree with ffprobe`.
+
+- **`DECLARED_DURATION_TOLERANCE_MS`, 2 ms, for durations the reader declared rather than
+  derived.** A declared duration comes from a frame count the encoder wrote, and a reader
+  that finds it and applies the encoder's delay and padding should land on ffprobe's
+  millisecond. The old 50 ms budget was hiding exactly that: an MP3 whose reader ignored
+  the LAME delay and padding was 31 ms long — two thirds of the budget spent on a defect
+  that reported itself as agreement. `compare_duration_within` is the general form and
+  `compare_duration` is unchanged for callers that do not know the reader's confidence.
+
+- **`FileKind::ALL`**, so the kinds that get *checked* live beside the kinds that get
+  *built*. A hand-maintained list in the binary is a list that drifts, and a kind in the
+  enum but absent from it is generated, costs seconds of ffmpeg, and is never compared
+  with anything. `FileKind` is now `#[non_exhaustive]`, so a kind this binary has not been
+  taught about reports its container as `unknown` rather than guessing `mp3` from its
+  extension.
+
+### Corrected
+
+- **A claim in this file's own reasoning was wrong and is worth recording.** The duration
+  reference here has always been ffprobe's, read at corpus-generation time — there was
+  never a moment when the harness compared our duration against our own. What was missing
+  was not an oracle but a *fixture*: the oracle existed and the corpus did not contain a
+  file in the encoding where the reader was wrong.
+
 ## [0.2.0] - 2026-10-06
 
 The harness stops pointing every tool at files ffmpeg wrote.

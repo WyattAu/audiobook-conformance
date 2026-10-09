@@ -355,6 +355,17 @@ fn is_disagreement(c: &ChapterFinding) -> bool {
 /// real disagreement rather than rounding.
 pub const DURATION_TOLERANCE_MS: u64 = 50;
 
+/// The tolerance for a duration the reader *declared* rather than derived.
+///
+/// Much tighter than [`DURATION_TOLERANCE_MS`] on purpose. A declared duration comes
+/// from a frame count the encoder wrote, and a reader that finds that count and applies
+/// the encoder's own delay and padding should land on the same millisecond ffprobe does.
+/// The two compute the same division, so anything beyond rounding is a defect — and a
+/// 50 ms tolerance was hiding exactly that: an MP3 whose reader ignored the LAME
+/// delay and padding was 31 ms long, a third of the budget spent on a defect that was
+/// always reported as agreement.
+pub const DECLARED_DURATION_TOLERANCE_MS: u64 = 2;
+
 /// How closely two chapter start times must agree, in milliseconds.
 ///
 /// Tighter than the duration tolerance on purpose: chapter boundaries are exact
@@ -409,8 +420,30 @@ pub struct CorpusFile {
     pub kind: FileKind,
 }
 
+impl FileKind {
+    /// Every kind, in the order a report reads best.
+    ///
+    /// Lives beside the enum rather than in the binary that runs it. A hand-maintained
+    /// list of the kinds *to check* is a list that drifts: a kind added here and built
+    /// there but absent from the list is generated, costs several seconds of ffmpeg, and
+    /// is then never compared with anything — a corpus file that exists so the harness
+    /// can check a thing, and does not.
+    pub const ALL: [FileKind; 9] = [
+        FileKind::M4bWithChapters,
+        FileKind::M4aBare,
+        FileKind::Mp3CbrTagged,
+        FileKind::Mp3Vbr,
+        FileKind::Mp3SpokenWord,
+        FileKind::Mp3Folder,
+        FileKind::Mp3ChaptersNoToc,
+        FileKind::Mp3ChaptersTopLevelOnly,
+        FileKind::Mp3V23Metadata,
+    ];
+}
+
 /// The kinds of file the corpus contains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FileKind {
     /// A single M4B with chapters, written by ffmpeg from an FFMetadata file.
     M4bWithChapters,
@@ -438,6 +471,16 @@ pub enum FileKind {
     /// chapters out of an ID3v2.3 `CHAP`, so a v2.3 fixture could not be judged by the
     /// oracle and would pass vacuously.
     Mp3ChaptersTopLevelOnly,
+    /// A 22.05 kHz mono MP3 — the encoding a spoken-word book is actually shipped in.
+    ///
+    /// Exists for one reason. MPEG-2 side information is 9 bytes mono where MPEG-1's
+    /// is 17, so the offset of a Xing/Info tag from the start of its frame differs, and
+    /// reading the width one byte short makes a perfectly good frame count read as
+    /// *absent*: the reader falls back to an estimate made from the bitrate of the very
+    /// frame the tag lives in, whose bitrate field is a placeholder. The result was a
+    /// 12-second audiobook reported as 6.9, with nothing to say so. Every other MP3 in
+    /// this corpus is 44.1 kHz, so nothing else could catch it.
+    Mp3SpokenWord,
     /// An ID3v2.3 MP3 with ordinary metadata frames and no chapters.
     ///
     /// ID3v2.3's frame header is one byte shorter than v2.4's, and reading it with the
@@ -461,6 +504,7 @@ impl FileKind {
             FileKind::Mp3ChaptersNoToc => Some(2),
             FileKind::Mp3ChaptersTopLevelOnly => Some(2),
             FileKind::Mp3V23Metadata => Some(2),
+            FileKind::Mp3SpokenWord => Some(3),
             // These have no chapters by design, and a file that did have some would be a
             // defect rather than a surprise.
             FileKind::M4aBare | FileKind::Mp3Vbr | FileKind::Mp3Folder => Some(0),
@@ -484,6 +528,7 @@ impl fmt::Display for FileKind {
             FileKind::Mp3ChaptersNoToc => "MP3 with CHAP chapters and no CTOC",
             FileKind::Mp3ChaptersTopLevelOnly => "MP3 with a top-level CTOC (flags 0x02)",
             FileKind::Mp3V23Metadata => "ID3v2.3 MP3 with ordinary metadata frames",
+            FileKind::Mp3SpokenWord => "22.05 kHz mono MP3 (spoken-word encoding)",
         };
         f.write_str(s)
     }
@@ -601,6 +646,46 @@ impl Corpus {
             mp3,
             "ffmpeg -i source.wav -i chapters.ffmeta -c:a libmp3lame -b:a 128k tagged.mp3".into(),
             FileKind::Mp3CbrTagged,
+        ));
+
+        // --- The encoding a spoken-word book ships in. ------------------------------
+        //
+        // 22.05 kHz mono, which is MPEG-2 rather than MPEG-1 and therefore has its own
+        // side-information width. Every other MP3 here is 44.1 kHz, so without this one
+        // the corpus cannot see a mistake in the MPEG-2 widths at all.
+        let spoken = root.join("spoken.mp3");
+        run(
+            "ffmpeg",
+            &args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                &source_arg,
+                "-i",
+                &path_arg(&meta),
+                "-map_metadata",
+                "1",
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "32k",
+                "-ar",
+                "22050",
+                "-ac",
+                "1",
+                "-write_id3v2",
+                "1",
+                &path_arg(&spoken),
+            ]),
+        )?;
+        built.push((
+            spoken,
+            "ffmpeg -i source.wav -i chapters.ffmeta -c:a libmp3lame -b:a 32k -ar 22050 \
+             -ac 1 spoken.mp3"
+                .into(),
+            FileKind::Mp3SpokenWord,
         ));
 
         // --- An MP3 with chapters and no table of contents. -------------------------
@@ -1457,13 +1542,26 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-/// Compare two durations with the harness's tolerance.
+/// Compare two durations with the harness's default tolerance.
+///
+/// [`compare_duration_within`] is the same check with a different budget; this is the
+/// one to reach for when the reader's confidence is not known here.
 #[must_use]
 pub fn compare_duration(reference_ms: Option<u64>, actual_ms: Option<u64>) -> DurationFinding {
+    compare_duration_within(reference_ms, actual_ms, DURATION_TOLERANCE_MS)
+}
+
+/// Compare two durations against an explicit tolerance in milliseconds.
+#[must_use]
+pub fn compare_duration_within(
+    reference_ms: Option<u64>,
+    actual_ms: Option<u64>,
+    tolerance_ms: u64,
+) -> DurationFinding {
     match (reference_ms, actual_ms) {
         (Some(r), Some(a)) => {
             let delta = r.abs_diff(a);
-            if delta <= DURATION_TOLERANCE_MS {
+            if delta <= tolerance_ms {
                 DurationFinding::Agreed {
                     reference_ms: r,
                     actual_ms: a,
@@ -1554,6 +1652,54 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
+
+    #[test]
+    fn a_declared_duration_is_held_to_a_tighter_budget_than_a_derived_one() {
+        // The real shape of the defect this exists for: a reader that found the
+        // encoder's frame count but ignored its delay and padding reported a 12 s
+        // audiobook as 12.031 s. That is 31 ms - inside the default 50 ms budget, so
+        // it was reported as agreement, and outside the declared one.
+        let delta = 12_031 - 12_000;
+        assert!(
+            delta <= DURATION_TOLERANCE_MS,
+            "the defect this budget exists for must be invisible to the old one"
+        );
+        assert!(
+            compare_duration_within(Some(12_000), Some(12_031), DECLARED_DURATION_TOLERANCE_MS)
+                .is_disagreement(),
+            "and visible to the new one"
+        );
+        // A difference this size is still not a disagreement when the reader had to
+        // derive the number, because a derived duration is a frame's worth of padding
+        // away from the truth by construction.
+        assert!(
+            !compare_duration_within(Some(12_000), Some(12_031), DURATION_TOLERANCE_MS)
+                .is_disagreement()
+        );
+    }
+
+    #[test]
+    fn every_kind_that_gets_built_is_in_the_list_that_gets_checked() {
+        // `FileKind::ALL` exists so this cannot drift silently. The check that it has
+        // not drifted is that every kind in it describes itself and names a chapter
+        // expectation: a kind added to the enum and forgotten everywhere else fails
+        // here, because `expected_chapters` has no arm for it.
+        assert_eq!(FileKind::ALL.len(), 9);
+        for kind in FileKind::ALL {
+            assert!(
+                !kind.to_string().is_empty(),
+                "{kind:?} has no description to print in a report"
+            );
+            let _ = kind.expected_chapters();
+        }
+        // And the spoken-word encoding is in it, which is the whole point of adding it:
+        // without this line a later edit could drop it and the run would be quieter,
+        // not louder.
+        assert!(
+            FileKind::ALL.contains(&FileKind::Mp3SpokenWord),
+            "the MPEG-2 fixture must be one of the kinds checked, or nothing gates it"
+        );
+    }
 
     #[test]
     fn json_string_escapes_are_resolved_rather_than_compared_raw() {
