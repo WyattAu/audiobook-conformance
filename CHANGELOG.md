@@ -73,6 +73,22 @@ Changelog](https://keepachangelog.com/) versions follow [semver](https://semver.
   was not an oracle but a *fixture*: the oracle existed and the corpus did not contain a
   file in the encoding where the reader was wrong.
 
+### Added
+
+- **Every corpus file is now probed twice — whole and windowed — and the two must
+  agree before anything is compared with ffprobe.** A disagreement stops the run as a
+  fixture failure, because a windowed reader that produced a *plausible* answer (a
+  duration a frame out, a chapter list read as absent) is worse than the slow path it
+  replaces, and real files with real chapter tracks in real `mdat`s are the only place
+  that can be checked. Hand-built fixtures have bytes where the sample table says they
+  are; ffmpeg's files are where the reader has to earn it.
+
+  This is the gate that would have caught the windowed probe's first MP4 bug on its own:
+  the audio window was searched for a second ID3 tag it had already passed, so every
+  tagged MP3 read as tagless. The crate's own equivalence tests caught it in the same
+  hour; this makes it a property of every future corpus run rather than of one test
+  file's fixtures.
+
 ## [0.2.0] - 2026-10-06
 
 The harness stops pointing every tool at files ffmpeg wrote.

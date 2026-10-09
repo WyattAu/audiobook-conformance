@@ -21,6 +21,10 @@ mp4-core = { version = "0.3", path = "../mp4-core" }
 symphonia = { version = "0.6", default-features = false, features = ["isomp4", "mp3"] }
 symphonia-metadata = "0.6"
 
+[dependencies.audiobook-shelf]
+version = "0.1"
+path = "../audiobook-shelf"
+
 [dev-dependencies]
 
 [lints.rust]

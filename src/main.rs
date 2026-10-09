@@ -166,6 +166,89 @@ fn check(file: &CorpusFile) -> Result<Report, Error> {
     // *reference* it compares against, not which reader ran — `MediaProbe` detects the
     // container itself, which is itself part of what is being tested.
     let probe = audiobook_core::MediaProbe::probe(&bytes);
+    // The same file through bounded reads. The two must agree on every field a caller
+    // can act on, because a windowed reader that produced a *plausible* answer — a
+    // duration a frame out, a chapter list read as absent — is worse than the slow path
+    // it replaces, and real files with real chapter tracks in real `mdat`s are the only
+    // place that can be checked.
+    let windowed = {
+        let mut reader =
+            audiobook_shelf::fs_reader::FileReader::open(&file.path).map_err(|e| Error::Io {
+                what: "open corpus file",
+                source: format!("{}: {e}", file.path.display()),
+            })?;
+        audiobook_core::MediaProbe::probe_source(&mut reader)
+    };
+    let mut windowed_findings = Vec::new();
+    if probe.container != windowed.container {
+        windowed_findings.push(format!(
+            "container {:?} vs {:?}",
+            probe.container, windowed.container
+        ));
+    }
+    // Each row is its own pair, because the fields have different types and a tuple of
+    // them would need one to lie about the others.
+    let mut rows: Vec<(&str, String, String)> = vec![
+        (
+            "duration",
+            format!("{:?}", probe.duration_ms),
+            format!("{:?}", windowed.duration_ms),
+        ),
+        (
+            "sample rate",
+            format!("{:?}", probe.sample_rate),
+            format!("{:?}", windowed.sample_rate),
+        ),
+        (
+            "channels",
+            format!("{:?}", probe.channels),
+            format!("{:?}", windowed.channels),
+        ),
+        (
+            "bitrate",
+            format!("{:?}", probe.bitrate_bps),
+            format!("{:?}", windowed.bitrate_bps),
+        ),
+        (
+            "variable bitrate",
+            format!("{:?}", probe.variable_bitrate),
+            format!("{:?}", windowed.variable_bitrate),
+        ),
+        (
+            "frame count",
+            format!("{:?}", probe.frame_count),
+            format!("{:?}", windowed.frame_count),
+        ),
+        (
+            "confidence",
+            format!("{:?}", probe.confidence),
+            format!("{:?}", windowed.confidence),
+        ),
+        (
+            "encoder trim",
+            format!("{:?}", probe.encoder_trim_applied),
+            format!("{:?}", windowed.encoder_trim_applied),
+        ),
+    ];
+    for (name, whole, win) in rows.drain(..) {
+        if whole != win {
+            windowed_findings.push(format!("{name} {whole} vs {win}"));
+        }
+    }
+    if probe.chapters != windowed.chapters {
+        windowed_findings.push(format!(
+            "chapters {} vs {}",
+            probe.chapters.len(),
+            windowed.chapters.len()
+        ));
+    }
+    if !windowed_findings.is_empty() {
+        return Err(Error::FixtureFailed {
+            path: file.path.display().to_string(),
+            recipe: "the windowed probe against the whole-file probe".into(),
+            detail: format!("the two readers disagree: {}", windowed_findings.join("; ")),
+        });
+    }
     let container = match file.kind {
         FileKind::M4bWithChapters | FileKind::M4aBare | FileKind::M4bTextTrackChapters => "mp4",
         FileKind::Mp3CbrTagged

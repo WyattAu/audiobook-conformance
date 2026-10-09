@@ -7,6 +7,7 @@ name = "audiobook-conformance"
 version = "0.3.0"
 dependencies = [
  "audiobook-core",
+ "audiobook-shelf",
  "id3-core",
  "mp4-core",
  "symphonia",
@@ -17,6 +18,15 @@ dependencies = [
 name = "audiobook-core"
 version = "0.5.0"
 dependencies = [
+ "id3-core",
+ "mp4-core",
+]
+
+[[package]]
+name = "audiobook-shelf"
+version = "0.1.0"
+dependencies = [
+ "audiobook-core",
  "id3-core",
  "mp4-core",
 ]
