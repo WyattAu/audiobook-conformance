@@ -385,6 +385,10 @@ pub const UNCHECKED_FIELDS: &[(&str, &str)] = &[
          start offset and the title",
     ),
     (
+        "trailing tags in a CBR estimate, MP3 without a declared frame count",
+        "a constant-bitrate MP3 with no Xing/Info has no duration anywhere, so it is          estimated from bytes over bitrate. This crate subtracts a trailing ID3v1 or APE          tag before dividing, because the tag is not audio; ffprobe and mutagen do not,          and agree with each other to the microsecond. On a tagged file the two estimates          differ by the tag's size — a few milliseconds at audiobook bitrates, inside this          harness's 50 ms derived-duration tolerance, so a run here would call them          agreement. It is not agreement; it is a documented divergence hidden inside a          tolerance. The crate's number is the closer one to the audio, which is why it          stands; this entry is why a green run must not be read as saying otherwise",
+    ),
+    (
         "CTOC nesting depth beyond one level",
         "mutagen exposes a TOC's child list, flags and membership, and those are now \
          verified against it \u{2014} which is how id3-core 0.2.0's transposed \

@@ -89,6 +89,18 @@ Changelog](https://keepachangelog.com/) versions follow [semver](https://semver.
   hour; this makes it a property of every future corpus run rather than of one test
   file's fixtures.
 
+### Added
+
+- **A named divergence, recorded where a green run would otherwise erase it.** On a
+  constant-bitrate MP3 with no declared frame count, this crate's duration estimate
+  subtracts a trailing ID3v1 or APE tag before dividing bytes by bitrate; ffprobe and
+  mutagen do not, and agree with each other to the microsecond. The estimates differ by
+  the tag's size — a few milliseconds at audiobook bitrates, squarely inside the 50 ms
+  derived-duration tolerance — so a run of this harness would call the two `agree` when
+  they are not. The entry in `UNCHECKED_FIELDS` says so, and why the crate's number stands:
+  it is the closer one to the audio. A tolerance is not a cross-check, and this entry is
+  what stops one being mistaken for the other.
+
 ## [0.2.0] - 2026-10-06
 
 The harness stops pointing every tool at files ffmpeg wrote.
