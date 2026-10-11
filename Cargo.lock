@@ -27,6 +27,7 @@ name = "audiobook-shelf"
 version = "0.1.0"
 dependencies = [
  "audiobook-core",
+ "cuesheet-core",
  "id3-core",
  "mp4-core",
 ]
@@ -48,6 +49,13 @@ name = "bytemuck"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
+
+[[package]]
+name = "cuesheet-core"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "id3-core"
