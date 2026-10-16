@@ -1,6 +1,6 @@
 [package]
 name = "audiobook-conformance"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Conformance harness for the WyattAu audiobook stack — generates a corpus with ffmpeg and cross-checks mp4-core, id3-core and audiobook-core against ffprobe and Symphonia"
@@ -11,15 +11,21 @@ categories = ["development-tools::testing", "multimedia::audio"]
 publish = false
 
 [dependencies]
-audiobook-core = { version = "0.3", path = "../audiobook-core" }
-id3-core = { version = "0.1", path = "../id3-core" }
+audiobook-core = { version = "0.5", path = "../audiobook-core" }
+id3-core = { version = "0.3", path = "../id3-core" }
 mp4-core = { version = "0.3", path = "../mp4-core" }
-
-[dev-dependencies]
-# The independent pure-Rust reader. Present so this harness can disagree with the
-# estate crates, which is the entire point of it.
+# The independent pure-Rust reader, as a real dependency rather than a dev one: it is
+# a third oracle this harness compares against, not a test convenience. Being pure Rust
+# it also works where ffmpeg is not installed, which is the difference between a harness
+# that runs anywhere and one that runs on a machine someone happened to set up.
 symphonia = { version = "0.6", default-features = false, features = ["isomp4", "mp3"] }
 symphonia-metadata = "0.6"
+
+[dependencies.audiobook-shelf]
+version = "0.1"
+path = "../audiobook-shelf"
+
+[dev-dependencies]
 
 [lints.rust]
 unsafe_code = "forbid"

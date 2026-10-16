@@ -4,9 +4,10 @@ version = 4
 
 [[package]]
 name = "audiobook-conformance"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "audiobook-core",
+ "audiobook-shelf",
  "id3-core",
  "mp4-core",
  "symphonia",
@@ -15,8 +16,18 @@ dependencies = [
 
 [[package]]
 name = "audiobook-core"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
+ "id3-core",
+ "mp4-core",
+]
+
+[[package]]
+name = "audiobook-shelf"
+version = "0.1.0"
+dependencies = [
+ "audiobook-core",
+ "cuesheet-core",
  "id3-core",
  "mp4-core",
 ]
@@ -40,8 +51,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
 
 [[package]]
-name = "id3-core"
+name = "cuesheet-core"
 version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "id3-core"
+version = "0.3.0"
 dependencies = [
  "thiserror",
 ]
@@ -60,7 +78,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "mp4-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "thiserror",
 ]

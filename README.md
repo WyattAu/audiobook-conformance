@@ -59,10 +59,39 @@ the corpus is reproducible from source and the repository stays small.
 - **Chapters** — count, start offset (2 ms tolerance) and title, against ffprobe.
 - **Duration** — 50 ms tolerance, about one AAC frame. Tighter than nothing because
   encoders pad frames, looser than nothing because rounding is real.
+- **Chapter sidecars, in both directions.** The checks above all read files *ffmpeg*
+  wrote, which can only catch a reader defect — no byte this estate writes had ever been
+  seen by an implementation that did not write it. That is the same blind spot that hid
+  `mp4-core`'s `chpl` layout defect for several releases, when every `chpl` test had run
+  against a box the crate wrote itself. So the sidecar round trip reverses the roles:
+  the estate renders a `;FFMETADATA1` file and ffmpeg muxes it, and separately ffmpeg
+  dumps a real corpus file with `-f ffmetadata` for the estate to read. Ten awkward
+  titles go through it: `=`, `;`, `#`, a mid-title backslash, a newline, surrounding
+  whitespace, one that looks like a section header, multi-byte UTF-8, quotes and percent
+  signs, and an empty title.
 
 Tolerances are deliberately different for the two, and the reason is worth stating:
 a chapter boundary is **exact metadata written by the producer**, so shifting one is
 misreporting a fact, whereas a duration is a measurement.
+
+## A fixture that loses its chapters fails the run
+
+Every corpus file declares how many chapters its recipe is supposed to produce, and
+`Corpus::generate` checks that against what ffprobe actually reports. Without that check
+the most dangerous failure available here is silent: a fixture that failed to encode its
+chapters leaves *both* sides finding nothing, so every comparison passes while comparing
+nothing.
+
+That is not hypothetical. A hand-built `CHAP` frame that lost its sub-frame header
+reported a clean pass for a whole iteration, which is why the expectation is asserted
+where it can still stop the run, as `Error::FixtureFailed`.
+
+## Not checked
+
+`UNCHECKED_FIELDS` is printed on every run. Agreement is only ever agreement on what is
+compared, and these are the things a reader could otherwise assume were verified: ID3
+chapter end times, `CTOC` hierarchy and depth, `CHAP` byte offsets, and the
+specification-shaped v2.3 frame header that no available tool reads.
 
 ## Honesty rules
 
