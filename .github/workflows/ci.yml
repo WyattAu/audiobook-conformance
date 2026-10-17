@@ -18,8 +18,14 @@ jobs:
       - name: Check ffmpeg is present
         # The corpus is generated with it. Without it the harness would be
         # verifying the estate crates against themselves, so the job is skipped
-        # rather than passing vacuously.
+        # rather than passing vacuously. Ubuntu runners ship ffmpeg since
+        # runner image 202410.10 ( runner-images#11236); if a future image
+        # drops it, this fails loudly and the install step below comes back.
         run: |
+          if ! command -v ffmpeg >/dev/null; then
+            echo "ffmpeg missing from the runner image — reinstall:"
+            sudo apt-get update --quiet && sudo apt-get install --yes --quiet ffmpeg
+          fi
           ffmpeg -version
           ffprobe -version
 
