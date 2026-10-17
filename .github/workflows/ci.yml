@@ -39,6 +39,5 @@ jobs:
     uses: WyattAu/engineering-standards/.github/workflows/rust-kit.yml@main
     with:
       estate-siblings: "mp4-core id3-core audiobook-core"
-      estate-siblings-token: ${{ secrets.ESTATE_SIBLINGS_TOKEN }}
       tier: a
       all-features: true
