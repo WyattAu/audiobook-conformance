@@ -24,7 +24,7 @@ jobs:
 
       - name: check out the estate siblings the manifest path-depends on
         run: |
-          for sibling in mp4-core id3-core audiobook-core; do
+          for sibling in mp4-core id3-core audiobook-core audiobook-shelf; do
             git clone --depth 1 "https://github.com/WyattAu/$sibling" "$GITHUB_WORKSPACE/../$sibling"
           done
 
@@ -56,6 +56,6 @@ jobs:
   standards:
     uses: WyattAu/engineering-standards/.github/workflows/rust-kit.yml@main
     with:
-      estate-siblings: "mp4-core id3-core audiobook-core"
+      estate-siblings: "mp4-core id3-core audiobook-core audiobook-shelf"
       tier: a
       all-features: true
