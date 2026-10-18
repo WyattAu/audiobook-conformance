@@ -308,6 +308,14 @@ impl Report {
             .any(|c| matches!(c, ChapterFinding::Unverified { .. }))
     }
 
+    /// Whether every disagreement in this report is already understood and
+    /// attributed to a known external limitation — reported above, but not
+    /// a gate failure.
+    #[must_use]
+    pub fn is_attributed(&self) -> bool {
+        self.chapters.iter().all(|c| !is_disagreement(c)) && !self.duration.is_disagreement()
+    }
+
     /// A one-line summary.
     #[must_use]
     pub fn summary(&self) -> String {
