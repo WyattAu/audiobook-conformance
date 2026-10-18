@@ -1,3 +1,10 @@
+# Bespoke CI: this crate's manifest path-depends on estate siblings
+# (../audiobook-core, ../id3-core, ../mp4-core), so the shared rust-kit
+# workflow — which checks out one repository — cannot resolve them. This
+# workflow checks the siblings out beside the caller (bootstrap.sh's layout
+# for a human clone) and runs the gates here. The standards job calls the
+# same rust-kit matrix with the siblings named, for the operator view.
+
 name: ci
 
 on:
@@ -5,25 +12,30 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: check out the estate siblings the manifest path-depends on
+        run: |
+          for sibling in mp4-core id3-core audiobook-core; do
+            git clone --depth 1 "https://github.com/WyattAu/$sibling" "$GITHUB_WORKSPACE/../$sibling"
+          done
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check ffmpeg is present
-        # The corpus is generated with it. Without it the harness would be
-        # verifying the estate crates against themselves, so the job is skipped
-        # rather than passing vacuously. Ubuntu runners ship ffmpeg since
-        # runner image 202410.10 ( runner-images#11236); if a future image
-        # drops it, this fails loudly and the install step below comes back.
+      - name: ffmpeg — the corpus is generated with it
         run: |
           if ! command -v ffmpeg >/dev/null; then
-            echo "ffmpeg missing from the runner image — reinstall:"
             sudo apt-get update --quiet && sudo apt-get install --yes --quiet ffmpeg
           fi
           ffmpeg -version
