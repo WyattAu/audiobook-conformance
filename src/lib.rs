@@ -1208,7 +1208,7 @@ pub fn has_ffprobe() -> bool {
 /// Generated rather than shipped so the corpus is reproducible from source and the
 /// repository stays small; 180 seconds at 44.1 kHz is about 15 MB on disk, which is
 /// the trade for a file long enough to have three distinct chapters.
-fn write_tone(path: &Path) -> Result<(), Error> {
+pub(crate) fn write_tone(path: &Path) -> Result<(), Error> {
     let sample_rate = 44_100u32;
     let seconds = 180u32;
     let samples = sample_rate as usize * seconds as usize;
@@ -1259,7 +1259,7 @@ fn ffmetadata(duration_ms: u64, titles: &[&str]) -> String {
 }
 
 /// Shorthand for a filesystem read or write with context.
-fn fs_write(path: &Path, contents: &str) -> Result<(), Error> {
+pub(crate) fn fs_write(path: &Path, contents: &str) -> Result<(), Error> {
     std::fs::write(path, contents).map_err(|e| Error::Io {
         what: "write corpus file",
         source: format!("{}: {e}", path.display()),
@@ -1273,7 +1273,7 @@ use std::fs;
 type Args = Vec<String>;
 
 /// Build an argument list from anything string-like.
-fn args<I, S>(items: I) -> Args
+pub(crate) fn args<I, S>(items: I) -> Args
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
@@ -1308,7 +1308,7 @@ fn run(tool: &'static str, args: &[String]) -> Result<(), Error> {
 ///
 /// Needed wherever the tool's *output* is the thing under test \u{2014} dumping chapters
 /// as ffmetadata, for instance \u{2014} where [`run`] throws the bytes away.
-fn run_capture(tool: &'static str, args: &[String]) -> Result<Vec<u8>, Error> {
+pub(crate) fn run_capture(tool: &'static str, args: &[String]) -> Result<Vec<u8>, Error> {
     let out = Command::new(tool)
         .args(args)
         .output()
@@ -1476,7 +1476,7 @@ fn splice_tag(audio: &Path, out: &Path, tag: &[u8]) -> Result<(), Error> {
 ///
 /// Paths with a leading `-` would be read as options; prefixing with `./` is the
 /// portable fix and costs nothing for an absolute path.
-fn path_arg(p: &Path) -> String {
+pub(crate) fn path_arg(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 

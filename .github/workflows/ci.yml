@@ -59,3 +59,9 @@ jobs:
       estate-siblings: "mp4-core id3-core audiobook-core cuesheet-core audiobook-shelf"
       tier: a
       all-features: true
+      # The harness is a process surface (ADR-0005): its substance is
+      # driving ffmpeg/ffprobe, which the line gate cannot see. The pure
+      # comparison logic stays gated; the driver and the two adapter
+      # modules are excluded, and the real end-to-end assertions live in
+      # the quality job where ffmpeg runs.
+      coverage-ignore-regex: "src/(main|sidecar|symphonia)\\.rs"
