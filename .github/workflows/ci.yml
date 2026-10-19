@@ -64,4 +64,4 @@ jobs:
       # comparison logic stays gated; the driver and the two adapter
       # modules are excluded, and the real end-to-end assertions live in
       # the quality job where ffmpeg runs.
-      coverage-ignore-regex: "src/(main|sidecar|symphonia)\\.rs"
+      coverage-ignore-regex: "src/(main|sidecar|symphonia|corpus)\\.rs"

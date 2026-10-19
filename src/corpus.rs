@@ -8,8 +8,8 @@
 //! quality job, where ffmpeg is installed and the output is checked.
 
 use crate::{
-    args, chap_body, chap_frame, ffmetadata, ffprobe, frame_body, fs_write, id3_tag, path_arg,
-    run_tool, splice_tag, tit2, CorpusFile, Error, FileKind,
+    args, ffprobe, fs_write, id3_tag, path_arg, run_tool, synchsafe, tit2, CorpusFile, Error,
+    FileKind,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -49,6 +49,100 @@ pub(crate) fn write_tone(path: &Path) -> Result<(), Error> {
         what: "write source tone",
         source: e.to_string(),
     })
+}
+
+/// An FFMetadata file with chapters, which is what ffmpeg turns into chapters.
+pub(crate) fn ffmetadata(duration_ms: u64, titles: &[&str]) -> String {
+    let mut out =
+        String::from(";FFMETADATA1\ntitle=The Long Now\nartist=A Narrator\nalbum=A Series\n");
+    let step = duration_ms / titles.len() as u64;
+    for (i, t) in titles.iter().enumerate() {
+        let start = step * i as u64;
+        let end = if i + 1 == titles.len() {
+            duration_ms
+        } else {
+            step * (i + 1) as u64
+        };
+        out.push_str("[CHAPTER]\nTIMEBASE=1/1000\n");
+        out.push_str(&format!("START={start}\nEND={end}\ntitle={t}\n"));
+    }
+    out
+}
+
+/// Splice a tag onto the front of a file, replacing any tag already there.
+pub(crate) fn splice_tag(audio: &Path, out: &Path, tag: &[u8]) -> Result<(), Error> {
+    let data = std::fs::read(audio).map_err(|e| Error::Io {
+        what: "read mp3 audio to tag",
+        source: format!("{}: {e}", audio.display()),
+    })?;
+    // Skip past an existing tag, or the two would be concatenated and only the first
+    // would be seen — which looks exactly like a tag that was never written.
+    let skip = if data.starts_with(b"ID3") {
+        let mut size = 0u32;
+        for b in data.get(6..10).unwrap_or(&[0; 4]) {
+            size = (size << 7) | u32::from(b & 0x7F);
+        }
+        10 + size as usize
+    } else {
+        0
+    };
+    let mut merged = tag.to_vec();
+    merged.extend_from_slice(data.get(skip..).unwrap_or(&[]));
+    std::fs::write(out, merged).map_err(|e| Error::Io {
+        what: "write tagged mp3",
+        source: format!("{}: {e}", out.display()),
+    })
+}
+
+/// Build a `CHAP` body.
+///
+/// The two offsets are `0xFFFFFFFF`, the sentinel the spec defines for "ignore this and
+/// use the time" — a real writer with no seek table emits exactly that, and a fixture
+/// that put plausible-looking byte offsets in would be testing nothing.
+pub(crate) fn chap_frame(element_id: &str, start_ms: u32, end_ms: u32, title: &str) -> Vec<u8> {
+    frame_body(b"CHAP", &chap_body(element_id, start_ms, end_ms, title, 4))
+}
+
+/// The body of a `CHAP` frame, without a header of its own.
+///
+/// Split out from [`chap_frame`] so a caller can frame it with a different version's
+/// header — a v2.3 tag needs nine-byte frame headers, and re-using the v2.4 form would
+/// test the wrong thing.
+pub(crate) fn chap_body(
+    element_id: &str,
+    start_ms: u32,
+    end_ms: u32,
+    title: &str,
+    version: u8,
+) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(element_id.as_bytes());
+    body.push(0x00);
+    body.extend_from_slice(&start_ms.to_be_bytes());
+    body.extend_from_slice(&end_ms.to_be_bytes());
+    body.extend_from_slice(&0xFFFF_FFFFu32.to_be_bytes());
+    body.extend_from_slice(&0xFFFF_FFFFu32.to_be_bytes());
+    // The sub-frame goes inside the CHAP body, so it needs its own header.
+    body.extend_from_slice(&frame_body(b"TIT2", &tit2(title, version)));
+    body
+}
+
+/// Wrap a frame body in a header for `version`, which is either 3 or 4.
+///
+/// v2.4 uses a synchsafe 4-byte size and a 2-byte flag field; v2.3 uses a plain 4-byte
+/// size and a 1-byte flag field, making the header one byte shorter. A parser that
+/// assumed the v2.4 shape reads a v2.3 frame's size as nonsense.
+pub(crate) fn frame_body(id: &[u8; 4], body: &[u8]) -> Vec<u8> {
+    // The version is not known here, so this builds the *body* including sub-frame
+    // headers only where they are version-independent; the caller adds the real frame
+    // header. Reserved for the v2.4-shaped header, which sub-frames use regardless of
+    // the parent frame's version per the spec.
+    let mut out = Vec::with_capacity(10 + body.len());
+    out.extend_from_slice(id);
+    out.extend_from_slice(&synchsafe(body.len() as u32));
+    out.extend_from_slice(&[0x00, 0x00]);
+    out.extend_from_slice(body);
+    out
 }
 
 impl crate::Corpus {
