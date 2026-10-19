@@ -1546,3 +1546,129 @@ mod tests {
         assert!(t.ends_with('…'));
     }
 }
+
+#[cfg(test)]
+mod display_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+
+    #[test]
+    fn source_display_names_both_reference_readers() {
+        assert_eq!(Source::Ffprobe.to_string(), "ffprobe");
+        assert_eq!(Source::Symphonia.to_string(), "symphonia");
+    }
+
+    #[test]
+    fn was_compared_distinguishes_comparison_from_absence() {
+        assert!(DurationFinding::Agreed {
+            reference_ms: 10,
+            actual_ms: 10
+        }
+        .was_compared());
+        assert!(DurationFinding::Disagreed {
+            reference_ms: 10,
+            actual_ms: 20,
+            delta_ms: 10
+        }
+        .was_compared());
+        assert!(!DurationFinding::Neither.was_compared());
+    }
+
+    #[test]
+    fn duration_display_covers_each_variant() {
+        let agreed = DurationFinding::Agreed {
+            reference_ms: 10_000,
+            actual_ms: 10_004,
+        };
+        assert!(agreed.to_string().contains("10004"));
+        assert!(agreed.to_string().contains("10000"));
+
+        let one_sided = DurationFinding::OneSided {
+            reference_ms: Some(5_000),
+            actual_ms: None,
+        };
+        assert!(one_sided.to_string().contains("5000"));
+
+        assert_eq!(
+            DurationFinding::Neither.to_string(),
+            "no duration on either side"
+        );
+    }
+
+    #[test]
+    fn chapter_display_carries_titles_times_and_mechanism_counts() {
+        let mismatch = ChapterFinding::Mismatch {
+            index: 2,
+            expected: crate::ReferenceChapter {
+                index: 2,
+                start_ms: 100,
+                title: "want".into(),
+            },
+            actual: ActualChapter {
+                start_ms: 200,
+                title: "got".into(),
+            },
+        };
+        let rendered = mismatch.to_string();
+        assert!(rendered.contains("want") && rendered.contains("got"));
+        assert!(rendered.contains("100") && rendered.contains("200"));
+
+        let mech = ChapterFinding::MechanismDisagreement {
+            chpl_len: 3,
+            track_len: 5,
+        };
+        assert!(mech.to_string().contains("3") && mech.to_string().contains("5"));
+
+        let unverified = ChapterFinding::Unverified {
+            field: "duration",
+            reason: "no reference",
+        };
+        assert!(unverified.to_string().contains("duration"));
+    }
+
+    #[test]
+    fn file_kind_display_names_every_kind() {
+        for kind in FileKind::ALL {
+            assert!(!kind.to_string().is_empty(), "{kind:?} has no name");
+        }
+        assert_eq!(
+            FileKind::M4bWithChapters.to_string(),
+            "M4B with Nero chpl chapters"
+        );
+    }
+
+    #[test]
+    fn a_chapter_title_with_braces_and_brackets_parses_whole() {
+        // ffprobe JSON with a title containing a `}` and a `{`: the object
+        // scan must find the brace that CLOSES the object, not the first
+        // one inside the title.
+        let json = r#"{"chapters": [
+            {"start_time": 0.0, "title": "opening {brace} [bracket]"},
+            {"start_time": 5.0, "title": "second"}
+        ]}"#;
+        let out = parse_ffprobe_json(json).expect("parses");
+        assert_eq!(out.chapters.len(), 2);
+        assert!(out.chapters[0].title.contains("{brace}"));
+        assert!(out.chapters[1].title == "second");
+    }
+
+    #[test]
+    fn a_chapter_without_a_title_field_reads_as_empty_not_an_error() {
+        let json = r#"{"chapters": [{"start_time": 0.0}]}"#;
+        let out = parse_ffprobe_json(json).expect("parses");
+        assert_eq!(out.chapters.len(), 1);
+        assert_eq!(out.chapters[0].title, "");
+    }
+
+    #[test]
+    fn a_truncated_chapters_array_after_a_complete_object_stops_cleanly() {
+        // The walker reads the complete object, then the remaining bytes
+        // ("," plus a truncated object start) don't contain a closing
+        // brace, so it stops rather than erroring on the missing bracket.
+        let json = r#"{"chapters": [{"start_time": 0.0, "title": "whole"},"#;
+        let out = parse_ffprobe_json(json).expect("parses");
+        assert_eq!(out.chapters.len(), 0, "the incomplete object is not read");
+        assert_eq!(out.duration_ms, None);
+    }
+}
