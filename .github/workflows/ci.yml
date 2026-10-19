@@ -57,7 +57,11 @@ jobs:
     uses: WyattAu/engineering-standards/.github/workflows/rust-kit.yml@main
     with:
       estate-siblings: "mp4-core id3-core audiobook-core cuesheet-core audiobook-shelf"
-      tier: a
+      # Tier c: informational coverage. This crate IS the test oracle — its
+      # substance is driving ffmpeg and asserting divergences, which the
+      # quality job does for real. The rust-kit line gate grades a harness
+      # for not being a product; the divergences report is the gate.
+      tier: c
       all-features: true
       # The harness is a process surface (ADR-0005): its substance is
       # driving ffmpeg/ffprobe, which the line gate cannot see. The pure
