@@ -1,2 +1,12 @@
 
 # cargo-vet imports lock
+
+[[audits.bytecodealliance.audits.num-traits]]
+who = "Andrew Brown <andrew.brown@intel.com>"
+criteria = "safe-to-deploy"
+version = "0.2.19"
+notes = "As advertised: a numeric library. The only `unsafe` is from some float-to-int conversions, which seems expected."
+
+[audits.mozilla.audits]
+
+[audits.zcash.audits]
