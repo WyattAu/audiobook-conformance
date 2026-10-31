@@ -1,6 +1,6 @@
 # audiobook-conformance
 
-Conformance harness for the WyattAu audiobook stack — generates a corpus with
+Conformance harness for the WyattAu audiobook stack; generates a corpus with
 **ffmpeg**, reads it back with `mp4-core` / `id3-core` / `audiobook-core`, and
 reports every disagreement against **ffprobe**'s own reading of the same file.
 
@@ -14,7 +14,7 @@ spots. A parser that agrees with itself proves nothing.
 
 This one found a bug on its first run that months of unit tests had missed:
 **`mp4-core` could not read a single real Nero chapter list.** Its `chpl` reader was
-built from the Adobe FLV specification, which is wrong in two places — the chapter
+built from the Adobe FLV specification, which is wrong in two places; the chapter
 count is one byte rather than four, and version 0 has no reserved bytes. Every test
 that had ever passed on `chpl` had done so against a box the crate had written
 itself.
@@ -45,7 +45,7 @@ Exits non-zero when anything disagrees, so it drops straight into CI.
 
 | Kind | Why |
 |---|---|
-| M4B with chapters, from an FFMetadata sidecar | ffmpeg writes **both** a Nero `chpl` and a QuickTime `tref`/`chap` chapter track — the two mechanisms are independent and real files carry one, the other, or both |
+| M4B with chapters, from an FFMetadata sidecar | ffmpeg writes **both** a Nero `chpl` and a QuickTime `tref`/`chap` chapter track; the two mechanisms are independent and real files carry one, the other, or both |
 | Bare M4A | must report **no** chapters, so a reader that invents them is caught |
 | CBR MP3 with ID3v2 | the common case, with `CHAP` frames |
 | VBR MP3 | exercises the Xing/Info/VBRI path |
@@ -56,11 +56,11 @@ the corpus is reproducible from source and the repository stays small.
 
 ## What it compares
 
-- **Chapters** — count, start offset (2 ms tolerance) and title, against ffprobe.
-- **Duration** — 50 ms tolerance, about one AAC frame. Tighter than nothing because
+- **Chapters**; count, start offset (2 ms tolerance) and title, against ffprobe.
+- **Duration**; 50 ms tolerance, about one AAC frame. Tighter than nothing because
   encoders pad frames, looser than nothing because rounding is real.
 - **Chapter sidecars, in both directions.** The checks above all read files *ffmpeg*
-  wrote, which can only catch a reader defect — no byte this estate writes had ever been
+  wrote, which can only catch a reader defect; no byte this estate writes had ever been
   seen by an implementation that did not write it. That is the same blind spot that hid
   `mp4-core`'s `chpl` layout defect for several releases, when every `chpl` test had run
   against a box the crate wrote itself. So the sidecar round trip reverses the roles:

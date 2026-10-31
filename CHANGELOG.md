@@ -40,11 +40,11 @@ Changelog](https://keepachangelog.com/) versions follow [semver](https://semver.
 
 ### Added
 
-- **A 22.05 kHz mono MP3 fixture — the encoding a spoken-word book actually ships in.**
+- **A 22.05 kHz mono MP3 fixture; the encoding a spoken-word book actually ships in.**
   Every MP3 in the corpus was 44.1 kHz, i.e. MPEG-1, so nothing in it could see a mistake
   in the MPEG-2 side-information widths. The reader's Xing/Info offset was one byte short
-  for MPEG-2, which does not fail loudly — the tag reads as *absent* and the duration is
-  then estimated from a placeholder bitrate — so a 12-second audiobook was reported as 6.9
+  for MPEG-2, which does not fail loudly; the tag reads as *absent* and the duration is
+  then estimated from a placeholder bitrate; so a 12-second audiobook was reported as 6.9
   seconds and the run was green.
 
   Confirmed by reintroducing the bug: with the wrong widths, this fixture and only this
@@ -54,7 +54,7 @@ Changelog](https://keepachangelog.com/) versions follow [semver](https://semver.
   derived.** A declared duration comes from a frame count the encoder wrote, and a reader
   that finds it and applies the encoder's delay and padding should land on ffprobe's
   millisecond. The old 50 ms budget was hiding exactly that: an MP3 whose reader ignored
-  the LAME delay and padding was 31 ms long — two thirds of the budget spent on a defect
+  the LAME delay and padding was 31 ms long; two thirds of the budget spent on a defect
   that reported itself as agreement. `compare_duration_within` is the general form and
   `compare_duration` is unchanged for callers that do not know the reader's confidence.
 
@@ -68,14 +68,14 @@ Changelog](https://keepachangelog.com/) versions follow [semver](https://semver.
 ### Corrected
 
 - **A claim in this file's own reasoning was wrong and is worth recording.** The duration
-  reference here has always been ffprobe's, read at corpus-generation time — there was
+  reference here has always been ffprobe's, read at corpus-generation time; there was
   never a moment when the harness compared our duration against our own. What was missing
   was not an oracle but a *fixture*: the oracle existed and the corpus did not contain a
   file in the encoding where the reader was wrong.
 
 ### Added
 
-- **Every corpus file is now probed twice — whole and windowed — and the two must
+- **Every corpus file is now probed twice; whole and windowed; and the two must
   agree before anything is compared with ffprobe.** A disagreement stops the run as a
   fixture failure, because a windowed reader that produced a *plausible* answer (a
   duration a frame out, a chapter list read as absent) is worse than the slow path it
@@ -95,8 +95,8 @@ Changelog](https://keepachangelog.com/) versions follow [semver](https://semver.
   constant-bitrate MP3 with no declared frame count, this crate's duration estimate
   subtracts a trailing ID3v1 or APE tag before dividing bytes by bitrate; ffprobe and
   mutagen do not, and agree with each other to the microsecond. The estimates differ by
-  the tag's size — a few milliseconds at audiobook bitrates, squarely inside the 50 ms
-  derived-duration tolerance — so a run of this harness would call the two `agree` when
+  the tag's size; a few milliseconds at audiobook bitrates, squarely inside the 50 ms
+  derived-duration tolerance; so a run of this harness would call the two `agree` when
   they are not. The entry in `UNCHECKED_FIELDS` says so, and why the crate's number stands:
   it is the closer one to the audio. A tolerance is not a cross-check, and this entry is
   what stops one being mistaken for the other.
@@ -140,15 +140,15 @@ The harness stops pointing every tool at files ffmpeg wrote.
 - **Symphonia is wired in as a third oracle.** It was declared and named in `Source` but
   never called, which is worse than absent: a capability a harness lists is a capability a
   reader assumes it has. With only ffprobe, every finding is "the estate disagrees with
-  ffmpeg", and agreement has a blind spot — there is no way to tell agreement from a shared
+  ffmpeg", and agreement has a blind spot; there is no way to tell agreement from a shared
   misreading. Symphonia is pure Rust with no shared code or history with either, so it
   breaks ties. It also runs where ffmpeg is not installed.
 
   Scope, stated plainly: Symphonia provides **container identification**, comparing
   `audiobook-core::container::detect` against a probe that shares nothing with it. It does
   *not* provide duration, despite this module being written for that first. Symphonia 0.6
-  exposes no duration without decoding — `Track`'s codec parameters carry a sample rate and
-  a codec id but no frame count, and neither the MP3 nor the ISOMP4 reader populates one —
+  exposes no duration without decoding; `Track`'s codec parameters carry a sample rate and
+  a codec id but no frame count, and neither the MP3 nor the ISOMP4 reader populates one -
   so the first version returned `None` for every file, which would have made a duration
   comparison pass vacuously with both sides reporting nothing. Duration remains ffprobe's,
   and the reason is written in the module so nobody re-derives it.
